@@ -2,7 +2,7 @@ pub mod optional;
 pub mod example;
 pub mod gui;
 
-// ------------------------------------------------------------------------------------------------
+// -------------------------------------------------------------------------------------------------
 
 use vulkano::command_buffer::{AutoCommandBufferBuilder, DynamicState, SubpassContents};
 use vulkano::instance::QueueFamily;
@@ -12,7 +12,7 @@ use crate::geometry2d::Size;
 
 pub use optional::Optional;
 
-// ------------------------------------------------------------------------------------------------
+// -------------------------------------------------------------------------------------------------
 
 pub trait Pipeline {
     fn raw_pipeline(&self) -> PipelineArc;

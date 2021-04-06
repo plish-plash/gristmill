@@ -7,7 +7,7 @@ use vulkano::instance::QueueFamily;
 use super::{FramebufferArc, RenderPassArc, RendererSetup, RendererLoader, SubpassSetup, subpass::*};
 use crate::geometry2d::Size;
 
-// ------------------------------------------------------------------------------------------------
+// -------------------------------------------------------------------------------------------------
 
 pub trait RenderPass: Sized {
     type Scene;
@@ -45,7 +45,7 @@ impl<T> RenderPassInfo<T> where T: RenderPass {
     }
 }
 
-// ------------------------------------------------------------------------------------------------
+// -------------------------------------------------------------------------------------------------
 
 pub struct GeometryPass<T> where T: RenderSubpass<SubpassCategory=Geometry> {
     subpass: T,

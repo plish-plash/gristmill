@@ -10,7 +10,7 @@ use super::renderer::{RendererSetup, RendererLoader, Renderer, RenderLoop, Rende
 use super::input::{InputActions, InputBindings};
 use super::geometry2d::Size;
 
-// ------------------------------------------------------------------------------------------------
+// -------------------------------------------------------------------------------------------------
 
 const MINIMUM_FRAME_TIME: Duration = Duration::from_millis(15);
 
@@ -60,7 +60,7 @@ pub trait GameLoop: Sized + 'static {
     }
 }
 
-// ------------------------------------------------------------------------------------------------
+// -------------------------------------------------------------------------------------------------
 
 pub trait Game {
     type RenderPass: RenderPass;

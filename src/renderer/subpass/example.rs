@@ -8,7 +8,7 @@ use vulkano::instance::QueueFamily;
 use crate::renderer::{PipelineArc, SubpassSetup};
 use super::{Pipeline, RenderSubpass, Geometry};
 
-// ------------------------------------------------------------------------------------------------
+// -------------------------------------------------------------------------------------------------
 
 mod vs {
     vulkano_shaders::shader! {
@@ -89,7 +89,7 @@ impl Pipeline for ExamplePipeline {
     fn raw_pipeline(&self) -> PipelineArc { self.pipeline.clone() }
 }
 
-// ------------------------------------------------------------------------------------------------
+// -------------------------------------------------------------------------------------------------
 
 pub struct ExampleSubpass(ExamplePipeline);
 

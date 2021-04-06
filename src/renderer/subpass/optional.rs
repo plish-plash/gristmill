@@ -1,6 +1,6 @@
 use super::{RenderSubpass, SubpassSetup, SubpassContents, AutoCommandBufferBuilder, QueueFamily, DynamicState, Size};
 
-// ------------------------------------------------------------------------------------------------
+// -------------------------------------------------------------------------------------------------
 
 pub struct Optional<T> where T: RenderSubpass {
     inner: Option<T>

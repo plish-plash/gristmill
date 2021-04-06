@@ -3,7 +3,7 @@ use std::fs::File;
 
 use serde::de::DeserializeOwned;
 
-// ------------------------------------------------------------------------------------------------
+// -------------------------------------------------------------------------------------------------
 
 type BufReader = io::BufReader<File>;
 
@@ -29,7 +29,7 @@ impl<T> Asset for T where T: RonAsset {
     }
 }
 
-// ------------------------------------------------------------------------------------------------
+// -------------------------------------------------------------------------------------------------
 
 pub fn load_asset<A: Asset>(asset_path: &str) -> io::Result<A> {
     // TODO figure out a base path intelligently instead of just using the working dir

@@ -4,7 +4,7 @@ use gristmill::renderer::{RendererSetup, RendererLoader, RenderPass, RenderPassI
 use gristmill::geometry2d::Size;
 use gristmill::input::{InputActions, ActionState, Axis2};
 
-// ------------------------------------------------------------------------------------------------
+// -------------------------------------------------------------------------------------------------
 
 type Scene = ();
 

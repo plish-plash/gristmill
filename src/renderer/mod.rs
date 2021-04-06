@@ -1,7 +1,7 @@
 pub mod pass;
 pub mod subpass;
 
-// ------------------------------------------------------------------------------------------------
+// -------------------------------------------------------------------------------------------------
 
 use std::sync::Arc;
 
@@ -35,13 +35,13 @@ use super::geometry2d::Size;
 
 pub use pass::{RenderPass, RenderPassInfo};
 
-// ------------------------------------------------------------------------------------------------
+// -------------------------------------------------------------------------------------------------
 
 type FramebufferArc = Arc<dyn vulkano::framebuffer::FramebufferAbstract + Send + Sync>;
 type RenderPassArc = Arc<dyn vulkano::framebuffer::RenderPassAbstract + Send + Sync>;
 pub type PipelineArc = Arc<dyn vulkano::pipeline::GraphicsPipelineAbstract + Send + Sync>;
 
-// ------------------------------------------------------------------------------------------------
+// -------------------------------------------------------------------------------------------------
 
 pub struct RendererSetup(Renderer, Vec<Arc<SwapchainImage<Window>>>, Option<Box<dyn GpuFuture>>);
 
@@ -264,7 +264,7 @@ impl Renderer {
     }
 }
 
-// ------------------------------------------------------------------------------------------------
+// -------------------------------------------------------------------------------------------------
 
 pub(crate) struct RenderLoop<G> where G: Game {
     renderer: Renderer,
