@@ -1,0 +1,14 @@
+(
+    button: [
+        ("primary", MouseButton(( button: Left ))),
+        ("secondary", MouseButton(( button: Right ))),
+        ("quit", Keyboard(( key: Escape ))),
+    ],
+    axis1: [],
+    axis2: [
+        ("camera_look", MouseMotion(( sensitivity: 0.1 ))),
+        ("camera_move", KeyboardComposite((
+            directions: (( key: W ), ( key: S ), ( key: A ), ( key: D ))
+        ))),
+    ],
+)

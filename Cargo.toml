@@ -1,0 +1,20 @@
+[package]
+name = "gristmill"
+version = "0.1.0"
+authors = ["plash <plishhplashh@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+vulkano = "0.22"
+vulkano-shaders = "0.22"
+vulkano-win = "0.22"
+winit = { version = "0.24", features = ["serde"] }
+rusttype = { version = "0.9.2", features = ["gpu_cache"] }
+
+palette = "*"
+stretch = { version = "0.3.3", package = "expanse", features = ["serde_camel_case"] }
+
+serde = "1.0"
+ron = "0.6"
