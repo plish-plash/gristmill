@@ -1,43 +1,34 @@
-use std::sync::mpsc;
 
-// -------------------------------------------------------------------------------------------------
-// Signals are for any number of senders to communicate with a known receiver.
+pub trait Event {
 
-// TODO when a signal is sent, the target should respond directly, instead of having to read the message from a queue.
-pub struct SignalTarget<Data> {
-    sender: mpsc::Sender<Data>,
-    receiver: mpsc::Receiver<Data>,
 }
 
-impl<Data> SignalTarget<Data> {
-    pub fn new() -> SignalTarget<Data> {
-        let (sender, receiver) = mpsc::channel();
-        SignalTarget { sender, receiver }
-    }
-    pub fn create_signal(&self) -> Signal<Data> {
-        Signal { sender: self.sender.clone() }
-    }
+pub struct EventSystem<E> where E: Event {
+    queue: Vec<E>,
 }
 
-pub struct Signal<Data> {
-    sender: mpsc::Sender<Data>,
-}
-
-impl<Data> Signal<Data> {
-    pub fn send(&self, data: Data) {
-        match self.sender.send(data) {
-            Ok(()) => (),
-            Err(_) => (), // TODO log the error
+impl<E> EventSystem<E> where E: Event {
+    pub fn new() -> EventSystem<E> {
+        EventSystem {
+            queue: Vec::new()
         }
     }
+    pub fn fire_event(&mut self, event: E) {
+        self.queue.push(event);
+    }
+    pub fn dispatch_queue<H>(&mut self, handler: &mut H, context: &mut H::Context) where H: EventHandler<E> {
+        while !self.queue.is_empty() {
+            for event in self.queue.split_off(0) {
+                handler.handle_event(self, context, event);
+            }
+        }
+    }
+    pub fn discard_queue(&mut self) {
+        self.queue.clear();
+    }
 }
 
-// -------------------------------------------------------------------------------------------------
-// Events are for a known sender to communicate with any number of receivers.
-
-// TODO
-pub struct EventBroadcaster {
-
+pub trait EventHandler<E: Event> {
+    type Context;
+    fn handle_event(&mut self, system: &mut EventSystem<E>, context: &mut Self::Context, event: E);
 }
-
-pub struct EventListener;

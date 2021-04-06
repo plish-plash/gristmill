@@ -6,8 +6,9 @@ use winit::{
     window::Window,
 };
 
+use super::asset::load_asset;
 use super::renderer::{RendererSetup, RendererLoader, Renderer, RenderLoop, RenderPass, RenderPassInfo};
-use super::input::{InputActions, InputBindings};
+use super::input::{InputSystem, InputBindings};
 use super::geometry2d::Size;
 
 // -------------------------------------------------------------------------------------------------
@@ -64,16 +65,15 @@ pub trait GameLoop: Sized + 'static {
 
 pub trait Game {
     type RenderPass: RenderPass;
-    type InputActions: InputActions + Default;
     fn load(&mut self, scene: &mut <Self::RenderPass as RenderPass>::Scene, renderer_setup: &mut RendererSetup) -> RenderPassInfo<Self::RenderPass>;
-    fn update(&mut self, scene: &mut <Self::RenderPass as RenderPass>::Scene, window: &Window, input: &Self::InputActions, delta: f64) -> bool;
+    fn update(&mut self, scene: &mut <Self::RenderPass as RenderPass>::Scene, window: &Window, input_system: &mut InputSystem, delta: f64) -> bool;
     fn update_renderer(&mut self, scene: &mut <Self::RenderPass as RenderPass>::Scene, render_pass: &mut RenderPassInfo<Self::RenderPass>, loader: &mut RendererLoader);
     fn resize(&mut self, scene: &mut <Self::RenderPass as RenderPass>::Scene, dimensions: Size);
 }
 
 pub fn run_game<G>(mut game: G, mut scene: <G::RenderPass as RenderPass>::Scene) -> ! where G: Game + 'static {
-    let input_bindings = InputBindings::load().unwrap();
+    let input_bindings = load_asset::<InputBindings>("controls").unwrap();
     let (mut renderer_setup, event_loop) = Renderer::create_window();
     let render_pass = game.load(&mut scene, &mut renderer_setup);
-    RenderLoop::new(renderer_setup, render_pass, game, scene, input_bindings).start(event_loop)
+    RenderLoop::new(renderer_setup, render_pass, game, scene, InputSystem::new(input_bindings)).start(event_loop)
 }

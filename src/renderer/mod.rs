@@ -30,7 +30,7 @@ use winit::{
 use vulkano_win::VkSurfaceBuild;
 
 use super::game::{Game, GameLoop};
-use super::input::InputBindings;
+use super::input::InputSystem;
 use super::geometry2d::Size;
 
 pub use pass::{RenderPass, RenderPassInfo};
@@ -271,14 +271,14 @@ pub(crate) struct RenderLoop<G> where G: Game {
     render_pass: RenderPassInfo<G::RenderPass>,
     game: G,
     scene: <G::RenderPass as RenderPass>::Scene,
-    input: InputBindings<G::InputActions>,
+    input_system: InputSystem,
 
     recreate_swapchain: bool,
     previous_frame_end: Option<Box<dyn GpuFuture>>,
 }
 
 impl<G> RenderLoop<G> where G: Game {
-    pub fn new(renderer: RendererSetup, mut render_pass: RenderPassInfo<G::RenderPass>, mut game: G, mut scene: <G::RenderPass as RenderPass>::Scene, input: InputBindings<G::InputActions>) -> RenderLoop<G> {
+    pub fn new(renderer: RendererSetup, mut render_pass: RenderPassInfo<G::RenderPass>, mut game: G, mut scene: <G::RenderPass as RenderPass>::Scene, input_system: InputSystem) -> RenderLoop<G> {
         let (mut renderer, images, setup_future) = (renderer.0, renderer.1, renderer.2);
         let framebuffers = renderer.window_size_dependent_setup(&images, render_pass.raw_info());
         renderer.framebuffers = framebuffers;
@@ -292,7 +292,7 @@ impl<G> RenderLoop<G> where G: Game {
             render_pass,
             game,
             scene,
-            input,
+            input_system,
             recreate_swapchain: false,
             previous_frame_end,
         }
@@ -302,9 +302,9 @@ impl<G> RenderLoop<G> where G: Game {
 impl<G> GameLoop for RenderLoop<G> where G: Game + 'static {
     fn window(&self) -> &Window { self.renderer.surface.window() }
     fn update(&mut self, delta: f64) -> bool {
-        self.input.start_frame();
-        let continue_loop = self.game.update(&mut self.scene, self.renderer.surface.window(), self.input.actions(), delta);
-        self.input.end_frame();
+        self.input_system.start_frame();
+        let continue_loop = self.game.update(&mut self.scene, self.renderer.surface.window(), &mut self.input_system, delta);
+        self.input_system.end_frame();
         continue_loop
     }
     fn event(&mut self, event: Event<()>) {
@@ -316,7 +316,7 @@ impl<G> GameLoop for RenderLoop<G> where G: Game + 'static {
                 _ => ()
             }
         }
-        self.input.event(event);
+        self.input_system.input_event(event);
     }
     fn render(&mut self) {
         // Calling this function polls various fences in order to determine what the GPU has
