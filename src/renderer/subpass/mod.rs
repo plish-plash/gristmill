@@ -8,7 +8,7 @@ use vulkano::command_buffer::{AutoCommandBufferBuilder, DynamicState, SubpassCon
 use vulkano::instance::QueueFamily;
 
 use super::{PipelineArc, SubpassSetup};
-use crate::gui::geometry::Size;
+use crate::geometry2d::Size;
 
 pub use optional::Optional;
 

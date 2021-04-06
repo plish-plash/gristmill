@@ -8,7 +8,7 @@ use winit::{
 
 use super::renderer::{RendererSetup, RendererLoader, Renderer, RenderLoop, RenderPass, RenderPassInfo};
 use super::input::{InputActions, InputBindings};
-use super::gui::geometry::Size;
+use super::geometry2d::Size;
 
 // ------------------------------------------------------------------------------------------------
 

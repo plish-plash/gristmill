@@ -5,7 +5,7 @@ use vulkano::format::{Format, ClearValue};
 use vulkano::instance::QueueFamily;
 
 use super::{FramebufferArc, RenderPassArc, RendererSetup, RendererLoader, SubpassSetup, subpass::*};
-use crate::gui::geometry::Size;
+use crate::geometry2d::Size;
 
 // ------------------------------------------------------------------------------------------------
 

@@ -31,7 +31,7 @@ use vulkano_win::VkSurfaceBuild;
 
 use super::game::{Game, GameLoop};
 use super::input::InputBindings;
-use super::gui::geometry::Size;
+use super::geometry2d::Size;
 
 pub use pass::{RenderPass, RenderPassInfo};
 

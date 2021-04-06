@@ -1,7 +1,7 @@
 use winit::event::{Event, VirtualKeyCode, MouseButton, WindowEvent, DeviceEvent, KeyboardInput, ElementState};
 use winit::dpi::PhysicalPosition;
 use serde::{Serialize, Deserialize};
-use crate::gui::geometry::Point;
+use crate::geometry2d::Point;
 use crate::asset::{RonAsset, AssetCategory, load_asset};
 
 // ------------------------------------------------------------------------------------------------

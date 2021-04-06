@@ -17,7 +17,8 @@ use std::sync::{Arc, Weak};
 
 use crate::color::{Color, encode_color};
 use crate::renderer::{PipelineArc, SubpassSetup, subpass::{self, Pipeline, RenderSubpass}};
-use crate::gui::{Gui, Node, geometry::{Rect, Point, Size}, font::fonts};
+use crate::gui::{Gui, Node, font::fonts};
+use crate::geometry2d::{Rect, Point, Size};
 
 #[derive(Default, Debug, Clone)]
 struct Vertex {

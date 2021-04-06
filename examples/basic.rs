@@ -1,7 +1,7 @@
 use winit::window::Window;
 use gristmill::game::{Game, run_game};
 use gristmill::renderer::{RendererSetup, RendererLoader, RenderPass, RenderPassInfo, pass, subpass};
-use gristmill::gui::geometry::Size;
+use gristmill::geometry2d::Size;
 use gristmill::input::{InputActions, ActionState, Axis2};
 
 // ------------------------------------------------------------------------------------------------
