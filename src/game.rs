@@ -6,6 +6,10 @@ use winit::{
     window::Window,
 };
 
+use super::renderer::{RendererSetup, RendererLoader, Renderer, RenderLoop, RenderPass, RenderPassInfo};
+use super::input::{InputActions, InputBindings};
+use super::gui::geometry::Size;
+
 // ------------------------------------------------------------------------------------------------
 
 const MINIMUM_FRAME_TIME: Duration = Duration::from_millis(15);
@@ -54,4 +58,22 @@ pub trait GameLoop: Sized + 'static {
             }
         })
     }
+}
+
+// ------------------------------------------------------------------------------------------------
+
+pub trait Game {
+    type RenderPass: RenderPass;
+    type InputActions: InputActions + Default;
+    fn load(&mut self, scene: &mut <Self::RenderPass as RenderPass>::Scene, renderer_setup: &mut RendererSetup) -> RenderPassInfo<Self::RenderPass>;
+    fn update(&mut self, scene: &mut <Self::RenderPass as RenderPass>::Scene, window: &Window, input: &Self::InputActions, delta: f64) -> bool;
+    fn update_renderer(&mut self, scene: &mut <Self::RenderPass as RenderPass>::Scene, render_pass: &mut RenderPassInfo<Self::RenderPass>, loader: &mut RendererLoader);
+    fn resize(&mut self, scene: &mut <Self::RenderPass as RenderPass>::Scene, dimensions: Size);
+}
+
+pub fn run_game<G>(mut game: G, mut scene: <G::RenderPass as RenderPass>::Scene) -> ! where G: Game + 'static {
+    let input_bindings = InputBindings::load().unwrap();
+    let (mut renderer_setup, event_loop) = Renderer::create_window();
+    let render_pass = game.load(&mut scene, &mut renderer_setup);
+    RenderLoop::new(renderer_setup, render_pass, game, scene, input_bindings).start(event_loop)
 }

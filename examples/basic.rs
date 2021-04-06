@@ -1,5 +1,6 @@
 use winit::window::Window;
-use gristmill::renderer::{Game, RendererSetup, RendererLoader, pass::{self, RenderPass, RenderPassInfo}, subpass, run_game};
+use gristmill::game::{Game, run_game};
+use gristmill::renderer::{RendererSetup, RendererLoader, RenderPass, RenderPassInfo, pass, subpass};
 use gristmill::gui::geometry::Size;
 use gristmill::input::{InputActions, ActionState, Axis2};
 
@@ -14,9 +15,9 @@ struct EmptyInputActions;
 
 impl InputActions for EmptyInputActions {
     fn end_frame(&mut self) {}
-    fn set_action_state_button(&mut self, target: &str, state: ActionState<bool>) {}
-    fn set_action_state_axis1(&mut self, target: &str, _state: ActionState<f32>) {}
-    fn set_action_state_axis2(&mut self, target: &str, state: ActionState<Axis2>) {}
+    fn set_action_state_button(&mut self, _target: &str, _state: ActionState<bool>) {}
+    fn set_action_state_axis1(&mut self, _target: &str, _state: ActionState<f32>) {}
+    fn set_action_state_axis2(&mut self, _target: &str, _state: ActionState<Axis2>) {}
 }
 
 impl Game for BasicGame {

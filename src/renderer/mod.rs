@@ -29,10 +29,11 @@ use winit::{
 };
 use vulkano_win::VkSurfaceBuild;
 
-use super::game_loop::GameLoop;
-use super::input::{InputActions, InputBindings};
+use super::game::{Game, GameLoop};
+use super::input::InputBindings;
 use super::gui::geometry::Size;
-use pass::{RenderPass, RenderPassInfo};
+
+pub use pass::{RenderPass, RenderPassInfo};
 
 // ------------------------------------------------------------------------------------------------
 
@@ -265,16 +266,7 @@ impl Renderer {
 
 // ------------------------------------------------------------------------------------------------
 
-pub trait Game {
-    type RenderPass: RenderPass;
-    type InputActions: InputActions + Default;
-    fn load(&mut self, scene: &mut <Self::RenderPass as RenderPass>::Scene, renderer_setup: &mut RendererSetup) -> RenderPassInfo<Self::RenderPass>;
-    fn update(&mut self, scene: &mut <Self::RenderPass as RenderPass>::Scene, window: &Window, input: &Self::InputActions, delta: f64) -> bool;
-    fn update_renderer(&mut self, scene: &mut <Self::RenderPass as RenderPass>::Scene, render_pass: &mut RenderPassInfo<Self::RenderPass>, loader: &mut RendererLoader);
-    fn resize(&mut self, scene: &mut <Self::RenderPass as RenderPass>::Scene, dimensions: Size);
-}
-
-struct RenderLoop<G> where G: Game {
+pub(crate) struct RenderLoop<G> where G: Game {
     renderer: Renderer,
     render_pass: RenderPassInfo<G::RenderPass>,
     game: G,
@@ -286,7 +278,7 @@ struct RenderLoop<G> where G: Game {
 }
 
 impl<G> RenderLoop<G> where G: Game {
-    fn new(renderer: RendererSetup, mut render_pass: RenderPassInfo<G::RenderPass>, mut game: G, mut scene: <G::RenderPass as RenderPass>::Scene, input: InputBindings<G::InputActions>) -> RenderLoop<G> {
+    pub fn new(renderer: RendererSetup, mut render_pass: RenderPassInfo<G::RenderPass>, mut game: G, mut scene: <G::RenderPass as RenderPass>::Scene, input: InputBindings<G::InputActions>) -> RenderLoop<G> {
         let (mut renderer, images, setup_future) = (renderer.0, renderer.1, renderer.2);
         let framebuffers = renderer.window_size_dependent_setup(&images, render_pass.raw_info());
         renderer.framebuffers = framebuffers;
@@ -394,11 +386,4 @@ impl<G> GameLoop for RenderLoop<G> where G: Game + 'static {
             }
         }
     }
-}
-
-pub fn run_game<G>(mut game: G, mut scene: <G::RenderPass as RenderPass>::Scene) -> ! where G: Game + 'static {
-    let input_bindings = InputBindings::load().unwrap();
-    let (mut renderer_setup, event_loop) = Renderer::create_window();
-    let render_pass = game.load(&mut scene, &mut renderer_setup);
-    RenderLoop::new(renderer_setup, render_pass, game, scene, input_bindings).start(event_loop)
 }
