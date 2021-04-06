@@ -8,9 +8,9 @@ use gristmill::input::InputSystem;
 
 type Scene = ();
 
-struct BasicGame;
+struct HelloGame;
 
-impl Game for BasicGame {
+impl Game for HelloGame {
     type RenderPass = pass::GeometryPass<subpass::example::ExampleSubpass>;
 
     fn load(&mut self, scene: &mut Scene, renderer_setup: &mut RendererSetup) -> RenderPassInfo<Self::RenderPass> {
@@ -27,5 +27,5 @@ impl Game for BasicGame {
 }
 
 fn main() {
-    run_game(BasicGame, ())
+    run_game(HelloGame, ())
 }
