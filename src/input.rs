@@ -2,6 +2,7 @@ use winit::event::{Event, VirtualKeyCode, MouseButton, WindowEvent, DeviceEvent,
 use winit::dpi::PhysicalPosition;
 use serde::{Serialize, Deserialize};
 use crate::gui::geometry::Point;
+use crate::asset::{RonAsset, AssetCategory, load_asset};
 
 // ------------------------------------------------------------------------------------------------
 
@@ -295,6 +296,10 @@ impl Bindings {
     }
 }
 
+impl RonAsset for Bindings {
+    fn category() -> AssetCategory { AssetCategory::Config }
+}
+
 pub struct InputBindings<T> where T: InputActions {
     bindings: Bindings,
     actions: T,
@@ -322,7 +327,7 @@ impl<T> InputBindings<T> where T: InputActions {
 
 impl<T> InputBindings<T> where T: InputActions + Default {
     pub fn load() -> std::io::Result<InputBindings<T>> {
-        let bindings = crate::read_ron_file("controls.ron")?;
+        let bindings = load_asset("controls")?;
         Ok(InputBindings {
             bindings,
             actions: T::default(),

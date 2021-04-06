@@ -50,10 +50,10 @@ impl InflaterNode {
 }
 
 pub fn inflate_gui<P>(gui: &mut Gui, parent: Node, style: &InflaterStyle, signal_target: Option<Arc<SignalTarget>>, path: P) where P: AsRef<std::path::Path> {
-    let nodes: Vec<InflaterNode> = crate::read_ron_file(path).unwrap(); // TODO handle errors
-    for node in nodes {
-        node.inflate(gui, parent, style, signal_target.clone());
-    }
+    // let nodes: Vec<InflaterNode> = crate::read_ron_file(path).unwrap(); // TODO handle errors
+    // for node in nodes {
+    //     node.inflate(gui, parent, style, signal_target.clone());
+    // }
 }
 
 pub struct RootInflaterSignalHandler {
