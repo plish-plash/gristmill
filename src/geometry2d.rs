@@ -59,22 +59,22 @@ impl From<Size> for [f32; 2] {
     }
 }
 
-impl From<Size> for stretch::geometry::Size<stretch::number::Number> {
-    fn from(size: Size) -> stretch::geometry::Size<stretch::number::Number> {
-        stretch::geometry::Size {
-            width: stretch::number::Number::Defined(size.width as f32),
-            height: stretch::number::Number::Defined(size.height as f32),
-        }
-    }
-}
-impl From<Size> for stretch::geometry::Size<stretch::style::Dimension> {
-    fn from(size: Size) -> stretch::geometry::Size<stretch::style::Dimension> {
-        stretch::geometry::Size {
-            width: stretch::style::Dimension::Points(size.width as f32),
-            height: stretch::style::Dimension::Points(size.height as f32),
-        }
-    }
-}
+// impl From<Size> for stretch::geometry::Size<stretch::number::Number> {
+//     fn from(size: Size) -> stretch::geometry::Size<stretch::number::Number> {
+//         stretch::geometry::Size {
+//             width: stretch::number::Number::Defined(size.width as f32),
+//             height: stretch::number::Number::Defined(size.height as f32),
+//         }
+//     }
+// }
+// impl From<Size> for stretch::geometry::Size<stretch::style::Dimension> {
+//     fn from(size: Size) -> stretch::geometry::Size<stretch::style::Dimension> {
+//         stretch::geometry::Size {
+//             width: stretch::style::Dimension::Points(size.width as f32),
+//             height: stretch::style::Dimension::Points(size.height as f32),
+//         }
+//     }
+// }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub struct Rect {
@@ -104,15 +104,15 @@ impl Rect {
     }
 }
 
-impl From<stretch::result::Layout> for Rect {
-    fn from(layout: stretch::result::Layout) -> Rect {
-        let x = layout.location.x as i32;
-        let y = layout.location.y as i32;
-        let width = layout.size.width as u32;
-        let height = layout.size.height as u32;
-        Rect {
-            position: Point { x, y },
-            size: Size { width, height },
-        }
-    }
-}
+// impl From<stretch::result::Layout> for Rect {
+//     fn from(layout: stretch::result::Layout) -> Rect {
+//         let x = layout.location.x as i32;
+//         let y = layout.location.y as i32;
+//         let width = layout.size.width as u32;
+//         let height = layout.size.height as u32;
+//         Rect {
+//             position: Point { x, y },
+//             size: Size { width, height },
+//         }
+//     }
+// }

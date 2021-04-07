@@ -72,7 +72,7 @@ pub trait Game {
 }
 
 pub fn run_game<G>(mut game: G, mut scene: <G::RenderPass as RenderPass>::Scene) -> ! where G: Game + 'static {
-    let input_bindings = load_asset::<InputBindings>("controls").unwrap();
+    let input_bindings = load_asset::<InputBindings>((), "controls").unwrap();
     let (mut renderer_setup, event_loop) = Renderer::create_window();
     let render_pass = game.load(&mut scene, &mut renderer_setup);
     RenderLoop::new(renderer_setup, render_pass, game, scene, InputSystem::new(input_bindings)).start(event_loop)

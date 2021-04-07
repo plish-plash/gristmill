@@ -17,7 +17,7 @@ use std::sync::{Arc, Weak};
 
 use crate::color::{Color, encode_color};
 use crate::renderer::{PipelineArc, SubpassSetup, subpass::{self, Pipeline, RenderSubpass}};
-use crate::gui::{Gui, Node, font::fonts};
+use crate::gui::{Gui, Node, font::{Font, fonts}};
 use crate::geometry2d::{Rect, Point, Size};
 
 #[derive(Default, Debug, Clone)]
@@ -233,10 +233,10 @@ impl<'a> DrawContext<'a> {
     pub fn color_rect_drawable(&mut self) -> Arc<SizedDrawable> {
         self.subpass.square_drawable.clone()
     }
-    pub fn text_drawable(&mut self, font_name: Option<&str>, size: f32, text: &str) -> Arc<TextDrawable> {
+    pub fn text_drawable(&mut self, font: Font, size: f32, text: &str) -> Arc<TextDrawable> {
         if text.is_empty() { panic!("text_drawable requires a non-empty string"); }
-        let font = fonts().get(font_name);
-        let glyphs: Vec<PositionedGlyph> = font.layout(text, Scale::uniform(size), point(0., 0.)).collect();
+        let font_asset = fonts().get(font);
+        let glyphs: Vec<PositionedGlyph> = font_asset.layout(text, Scale::uniform(size), point(0., 0.)).collect();
         let drawable = Arc::new(TextDrawable::new(glyphs));
         self.subpass.text_drawables.push((Arc::downgrade(&drawable), None));
         self.text_changed = true;

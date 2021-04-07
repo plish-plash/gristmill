@@ -2,10 +2,12 @@ pub mod font;
 
 use crate::geometry2d::*;
 
-pub use stretch::{node::Node, style::Style};
 pub use super::renderer::subpass::gui::{DrawCommand, DrawContext, SizedDrawable, TextDrawable};
 
 pub struct Gui;
+
+#[derive(Copy, Clone, Debug)]
+pub struct Node(usize);
 
 impl Gui {
     pub fn new() -> Gui { Gui }
