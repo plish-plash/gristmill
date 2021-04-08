@@ -17,7 +17,7 @@ use std::sync::{Arc, Weak};
 
 use crate::color::{Color, encode_color};
 use crate::renderer::{PipelineArc, SubpassSetup, subpass::{self, Pipeline, RenderSubpass}};
-use crate::gui::{Gui, Node, font::{Font, fonts}};
+use crate::gui::{Gui, GuiNode, font::{Font, fonts}};
 use crate::geometry2d::{Rect, Point, Size};
 
 #[derive(Default, Debug, Clone)]
@@ -389,7 +389,7 @@ impl RenderSubpass for GuiSubpass {
             dynamic_state,
             screen_dimensions: self.screen_dimensions.into(),
         };
-        visitor.walk(scene, scene.root_node(), Point::default());
+        visitor.walk(scene, scene.root(), Point::default());
     }
 }
 
@@ -402,7 +402,7 @@ struct DrawCommandVisitor<'a> {
 
 // TODO instead of one draw call per DrawCommand, build an instance buffer
 impl<'a> DrawCommandVisitor<'a> {
-    fn visit(&mut self, scene: &Gui, node: Node, parent_position: Point) -> Point {
+    fn visit(&mut self, scene: &Gui, node: GuiNode, parent_position: Point) -> Point {
         let (node_position, draw_command) = scene.draw_widget(parent_position, node);
         if let Some(draw_command) = draw_command {
             let vertex_buffer: Arc<dyn BufferAccess + Send + Sync> = match draw_command.vertex_buffer {
@@ -427,10 +427,10 @@ impl<'a> DrawCommandVisitor<'a> {
         }
         node_position
     }
-    fn walk(&mut self, gui: &Gui, node: Node, parent_position: Point) {
+    fn walk(&mut self, gui: &Gui, node: GuiNode, parent_position: Point) {
         let node_position = self.visit(gui, node, parent_position);
-        for child in gui.children(node).unwrap() {
-            self.walk(gui, child, node_position);
+        for child in gui.iter_children(node) {
+            self.walk(gui, *child, node_position);
         }
     }
 }

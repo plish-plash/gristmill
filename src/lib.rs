@@ -1,6 +1,7 @@
 pub mod asset;
 pub mod color;
 pub mod event;
+pub mod forest;
 pub mod game;
 pub mod geometry2d;
 pub mod gui;
