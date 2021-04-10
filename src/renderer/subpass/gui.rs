@@ -13,12 +13,13 @@ use vulkano::pipeline::GraphicsPipeline;
 use vulkano::sampler::{Sampler, Filter, MipmapMode, SamplerAddressMode};
 use vulkano::instance::QueueFamily;
 
+use std::cell::RefCell;
 use std::sync::{Arc, Weak};
 
 use crate::color::{Color, encode_color};
 use crate::renderer::{PipelineArc, SubpassSetup, subpass::{self, Pipeline, RenderSubpass}};
-use crate::gui::{Gui, GuiNode, font::{Font, fonts}};
-use crate::geometry2d::{Rect, Point, Size};
+use crate::gui::{Gui, font::{Font, fonts}};
+use crate::geometry2d::{Rect, Size};
 
 #[derive(Default, Debug, Clone)]
 struct Vertex {
@@ -166,9 +167,11 @@ impl Pipeline for GuiPipeline {
 const TEXT_CACHE_WIDTH: usize = 1000;
 const TEXT_CACHE_HEIGHT: usize = 1000;
 
+type TextBuffer = Arc<CpuAccessibleBuffer<[Vertex]>>; // TODO remove this type
+
 enum DrawVertexBuffer {
     Raw(Arc<ImmutableBuffer<[Vertex]>>),
-    Text(Arc<TextDrawable>),
+    Text(TextBuffer),
 }
 
 pub struct DrawCommand {
@@ -178,18 +181,47 @@ pub struct DrawCommand {
     color: [f32; 4],
 }
 
+// TODO instead of one draw call per DrawCommand, build an instance buffer
+impl DrawCommand {
+    fn add_to_builder(self, pipeline: &GuiPipeline, builder: &mut AutoCommandBufferBuilder, dynamic_state: &DynamicState, screen_dimensions: [f32; 2]) {
+        let vertex_buffer: Arc<dyn BufferAccess + Send + Sync> = match self.vertex_buffer {
+            DrawVertexBuffer::Raw(buffer) => buffer,
+            DrawVertexBuffer::Text(buffer) => buffer,
+        };
+        let push_constants = vs::ty::PushConstants {
+            screen_size: screen_dimensions,
+            position: self.position,
+            size: self.size,
+            color: self.color,
+            _dummy0: [0; 8],
+        };
+        builder.draw(
+            pipeline.raw_pipeline(),
+            dynamic_state,
+            vec![vertex_buffer],
+            pipeline.descriptor_set.clone(),
+            push_constants,
+            vec![],
+        ).unwrap();
+    }
+}
+
+pub trait Drawable {
+    fn draw(&self, context: &mut DrawContext<'_>, rect: Rect, color: Color);
+}
+
 pub struct SizedDrawable {
     vertex_buffer: Arc<ImmutableBuffer<[Vertex]>>,
 }
 
-impl SizedDrawable {
-    pub fn draw(&self, rect: Rect, color: Color) -> DrawCommand {
-        DrawCommand {
+impl Drawable for SizedDrawable {
+    fn draw(&self, context: &mut DrawContext<'_>, rect: Rect, color: Color) {
+        context.queue_draw(DrawCommand {
             vertex_buffer: DrawVertexBuffer::Raw(self.vertex_buffer.clone()),
             position: rect.position.into(),
             size: rect.size.into(),
             color: encode_color(color),
-        }
+        });
     }
 }
 
@@ -197,57 +229,61 @@ pub struct TextDrawable {
     text_glyphs: Vec<PositionedGlyph<'static>>,
     width: f32,
     v_metrics: rusttype::VMetrics,
+    buffer: RefCell<Option<TextBuffer>>,
 }
-
-type TextBuffer = Arc<CpuAccessibleBuffer<[Vertex]>>;
 
 impl TextDrawable {
     fn new(text_glyphs: Vec<PositionedGlyph<'static>>) -> TextDrawable {
         let last_glyph = text_glyphs.last().unwrap();
         let width = last_glyph.position().x + last_glyph.unpositioned().h_metrics().advance_width;
         let v_metrics = last_glyph.font().v_metrics(last_glyph.scale());
-        TextDrawable { text_glyphs, width, v_metrics }
+        TextDrawable { text_glyphs, width, v_metrics, buffer: RefCell::new(None), }
     }
 
     pub fn width(&self) -> f32 { self.width }
     pub fn ascent(&self) -> f32 { self.v_metrics.ascent }
     pub fn height(&self) -> f32 { self.v_metrics.ascent - self.v_metrics.descent }
+}
 
-    pub fn draw(self: Arc<TextDrawable>, position: Point, color: Color) -> DrawCommand {
-        DrawCommand {
-            vertex_buffer: DrawVertexBuffer::Text(self),
-            position: position.into(),
+impl Drawable for TextDrawable {
+    fn draw(&self, context: &mut DrawContext<'_>, rect: Rect, color: Color) {
+        let buffer = self.buffer.borrow().as_ref().unwrap().clone();
+        context.queue_draw(DrawCommand {
+            vertex_buffer: DrawVertexBuffer::Text(buffer),
+            position: rect.position.into(),
             size: [1., 1.],
             color: encode_color(color),
-        }
+        });
     }
 }
 
 pub struct DrawContext<'a> {
-    builder: &'a mut AutoCommandBufferBuilder,
     subpass: &'a mut GuiSubpass,
     text_changed: bool,
 }
 
 impl<'a> DrawContext<'a> {
-    pub fn color_rect_drawable(&mut self) -> Arc<SizedDrawable> {
+    pub fn new_color_rect_drawable(&mut self) -> Arc<SizedDrawable> {
         self.subpass.square_drawable.clone()
     }
-    pub fn text_drawable(&mut self, font: Font, size: f32, text: &str) -> Arc<TextDrawable> {
+    pub fn new_text_drawable(&mut self, font: Font, size: f32, text: &str) -> Arc<TextDrawable> {
         if text.is_empty() { panic!("text_drawable requires a non-empty string"); }
         let font_asset = fonts().get(font);
         let glyphs: Vec<PositionedGlyph> = font_asset.layout(text, Scale::uniform(size), point(0., 0.)).collect();
         let drawable = Arc::new(TextDrawable::new(glyphs));
-        self.subpass.text_drawables.push((Arc::downgrade(&drawable), None));
+        self.subpass.text_drawables.push(Arc::downgrade(&drawable));
         self.text_changed = true;
         drawable
     }
 
-    fn update_cache(&mut self) {
+    fn update_cache(&mut self, builder: &mut AutoCommandBufferBuilder) {
         if self.text_changed {
-            self.subpass.update_text_cache(self.builder);
+            self.subpass.update_text_cache(builder);
             self.text_changed = false;
         }
+    }
+    fn queue_draw(&mut self, command: DrawCommand) {
+        self.subpass.pending_draw_commands.push(command);
     }
 }
 
@@ -257,34 +293,26 @@ pub struct GuiSubpass {
     screen_dimensions: Size,
     
     square_drawable: Arc<SizedDrawable>,
-    text_drawables: Vec<(Weak<TextDrawable>, Option<TextBuffer>)>,
+    text_drawables: Vec<Weak<TextDrawable>>,
     text_cache: Cache<'static>,
     text_cache_pixel_buffer: Vec<u8>,
+
+    pending_draw_commands: Vec<DrawCommand>,
 }
 
 impl GuiSubpass {
-    fn make_context<'a>(&'a mut self, builder: &'a mut AutoCommandBufferBuilder) -> DrawContext<'a> {
-        DrawContext {
-            builder, subpass: self, text_changed: false
-        }
-    }
-    fn find_text_vertex_buffer(&self, drawable: Arc<TextDrawable>) -> TextBuffer {
-        let drawable = Arc::downgrade(&drawable);
-        for (weak, buffer) in self.text_drawables.iter() {
-            if weak.ptr_eq(&drawable) {
-                return buffer.as_ref().cloned().expect("TextDrawable has not been cached");
-            }
-        }
-        panic!("TextDrawable not found in subpass");
+    fn make_context<'a>(&'a mut self) -> DrawContext<'a> {
+        self.pending_draw_commands.clear();
+        DrawContext { subpass: self, text_changed: false }
     }
 
     fn update_text_cache(&mut self, builder: &mut AutoCommandBufferBuilder) {
         // Remove drawables that no longer exist.
         // TODO might want to do this somewhere else also to reclaim the buffers faster.
-        self.text_drawables.retain(|text| text.0.strong_count() > 0);
+        self.text_drawables.retain(|drawable| drawable.strong_count() > 0);
 
         // Add visible drawables to the cache queue.
-        for (drawable, _) in self.text_drawables.iter() {
+        for drawable in self.text_drawables.iter() {
             for glyph in drawable.upgrade().unwrap().text_glyphs.iter() {
                 self.text_cache.queue_glyph(0, glyph.clone());
             }
@@ -325,7 +353,7 @@ impl GuiSubpass {
         ).unwrap();
 
         // TODO might be able to reuse some of these vertex buffers if cache_queued returns CachedBy::Adding
-        for (drawable, buffer) in self.text_drawables.iter_mut() {
+        for drawable in self.text_drawables.iter_mut() {
             let drawable = drawable.upgrade().unwrap();
             let vertices: Vec<Vertex> = drawable.text_glyphs.iter().flat_map(|g| {
                 if let Ok(Some((uv_rect, screen_rect))) = cache.rect_for(0, g) {
@@ -345,7 +373,13 @@ impl GuiSubpass {
             }).collect();
 
             // TODO use CpuBufferPool
-            *buffer = Some(CpuAccessibleBuffer::from_iter(self.device.clone(), BufferUsage::vertex_buffer(), false, vertices.into_iter()).unwrap());
+            drawable.buffer.replace(
+                Some(CpuAccessibleBuffer::from_iter(
+                    self.device.clone(),
+                    BufferUsage::vertex_buffer(),
+                    false,
+                    vertices.into_iter(),
+                ).unwrap()));
         }
     }
 }
@@ -369,6 +403,8 @@ impl RenderSubpass for GuiSubpass {
             text_drawables: Vec::new(),
             text_cache,
             text_cache_pixel_buffer,
+
+            pending_draw_commands: Vec::new(),
         }
     }
     fn set_dimensions(&mut self, dimensions: Size) {
@@ -376,61 +412,16 @@ impl RenderSubpass for GuiSubpass {
     }
 
     fn pre_render(&mut self, scene: &mut Gui, builder: &mut AutoCommandBufferBuilder, _queue_family: QueueFamily) {
-        let mut context = self.make_context(builder);
-        scene.refresh_drawables(&mut context);
-        context.update_cache();
-        scene.refresh_layout(self.screen_dimensions);
+        scene.layout_if_needed(self.screen_dimensions);
+        let mut context = self.make_context();
+        scene.draw(&mut context);
+        context.update_cache(builder);
     }
 
-    fn render(&mut self, scene: &Gui, builder: &mut AutoCommandBufferBuilder, dynamic_state: &DynamicState) {
-        let mut visitor = DrawCommandVisitor {
-            subpass: self,
-            builder,
-            dynamic_state,
-            screen_dimensions: self.screen_dimensions.into(),
-        };
-        visitor.walk(scene, scene.root(), Point::default());
-    }
-}
-
-struct DrawCommandVisitor<'a> {
-    subpass: &'a GuiSubpass,
-    builder: &'a mut AutoCommandBufferBuilder,
-    dynamic_state: &'a DynamicState,
-    screen_dimensions: [f32; 2],
-}
-
-// TODO instead of one draw call per DrawCommand, build an instance buffer
-impl<'a> DrawCommandVisitor<'a> {
-    fn visit(&mut self, scene: &Gui, node: GuiNode, parent_position: Point) -> Point {
-        let (node_position, draw_command) = scene.draw_widget(parent_position, node);
-        if let Some(draw_command) = draw_command {
-            let vertex_buffer: Arc<dyn BufferAccess + Send + Sync> = match draw_command.vertex_buffer {
-                DrawVertexBuffer::Raw(buffer) => buffer,
-                DrawVertexBuffer::Text(drawable) => self.subpass.find_text_vertex_buffer(drawable),
-            };
-            let push_constants = vs::ty::PushConstants {
-                screen_size: self.screen_dimensions,
-                position: draw_command.position,
-                size: draw_command.size,
-                color: draw_command.color,
-                _dummy0: [0; 8],
-            };
-            self.builder.draw(
-                self.subpass.pipeline.raw_pipeline(),
-                self.dynamic_state,
-                vec![vertex_buffer],
-                self.subpass.pipeline.descriptor_set.clone(),
-                push_constants,
-                vec![],
-            ).unwrap();
-        }
-        node_position
-    }
-    fn walk(&mut self, gui: &Gui, node: GuiNode, parent_position: Point) {
-        let node_position = self.visit(gui, node, parent_position);
-        for child in gui.iter_children(node) {
-            self.walk(gui, *child, node_position);
+    fn render(&mut self, _scene: &Gui, builder: &mut AutoCommandBufferBuilder, dynamic_state: &DynamicState) {
+        let screen_dimensions = self.screen_dimensions.into();
+        for draw_command in self.pending_draw_commands.drain(..) {
+            draw_command.add_to_builder(&self.pipeline, builder, dynamic_state, screen_dimensions);
         }
     }
 }

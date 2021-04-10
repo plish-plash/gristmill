@@ -15,6 +15,7 @@ impl Point {
             y: y.round() as i32,
         }
     }
+    pub fn origin() -> Point { Self::default() }
 
     pub fn offset(&mut self, other: Point) {
         self.x += other.x;
@@ -83,6 +84,10 @@ pub struct Rect {
 }
 
 impl Rect {
+    pub fn zero() -> Rect {
+        Rect { position: Point::origin(), size: Size::zero() }
+    }
+
     pub fn top_left(&self) -> Point {
         self.position
     }

@@ -13,6 +13,13 @@ impl<K, I> Forest<K, I> where K: Key {
         Forest { nodes: SlotMap::with_key() }
     }
 
+    pub fn get(&self, node: K) -> &I {
+        &self.nodes.get(node).unwrap().item
+    }
+    pub fn get_mut(&mut self, node: K) -> &mut I {
+        &mut self.nodes.get_mut(node).unwrap().item
+    }
+
     pub fn set_parent(&mut self, node: K, parent: K) {
         let old_parent = self.nodes.get(node).unwrap().parent;
         if old_parent == parent {
