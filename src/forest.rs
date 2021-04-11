@@ -20,6 +20,9 @@ impl<K, I> Forest<K, I> where K: Key {
         &mut self.nodes.get_mut(node).unwrap().item
     }
 
+    pub fn get_parent(&self, node: K) -> K {
+        self.nodes.get(node).unwrap().parent
+    }
     pub fn set_parent(&mut self, node: K, parent: K) {
         let old_parent = self.nodes.get(node).unwrap().parent;
         if old_parent == parent {

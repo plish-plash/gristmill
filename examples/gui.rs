@@ -1,6 +1,6 @@
 use winit::window::Window;
 use gristmill::game::{Game, run_game};
-use gristmill::gui::{Gui, color_rect::ColorRect};
+use gristmill::gui::{Gui, color_rect::ColorRect, layout::*};
 use gristmill::renderer::{RendererSetup, RendererLoader, RenderPass, RenderPassInfo, pass, subpass};
 use gristmill::color::Color;
 use gristmill::geometry2d::*;
@@ -17,7 +17,11 @@ impl Game for GuiGame {
 
     fn load(&mut self, (_, gui): &mut Scene, renderer_setup: &mut RendererSetup) -> RenderPassInfo<Self::RenderPass> {
         let color_rect = gui.add(gui.root(), ColorRect::new(Color::new(0., 1., 0., 1.)));
-        gui.set_node_rect(color_rect, Rect { position: Point::new(64, 64), size: Size::new(256, 64) });
+        let mut layout = Layout::with_base_size(Size { width: 128, height: 128 });
+        layout.set_anchor(Side::Top, Anchor { target: AnchorTarget::Parent, target_side: AnchorTargetSide::SameSide, offset: 64 });
+        layout.set_anchor(Side::Left, Anchor { target: AnchorTarget::Parent, target_side: AnchorTargetSide::SameSide, offset: 32 });
+        layout.set_anchor(Side::Right, Anchor { target: AnchorTarget::Parent, target_side: AnchorTargetSide::SameSide, offset: 32 });
+        gui.set_node_layout(color_rect, layout);
 
         Self::RenderPass::new(renderer_setup)
     }

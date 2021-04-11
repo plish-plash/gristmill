@@ -29,7 +29,7 @@ impl From<Point> for [f32; 2] {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Default, Debug)]
 pub struct Size {
     pub width: u32,
     pub height: u32,
