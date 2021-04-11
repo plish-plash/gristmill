@@ -167,11 +167,9 @@ impl Pipeline for GuiPipeline {
 const TEXT_CACHE_WIDTH: usize = 1000;
 const TEXT_CACHE_HEIGHT: usize = 1000;
 
-type TextBuffer = Arc<CpuAccessibleBuffer<[Vertex]>>; // TODO remove this type
-
 enum DrawVertexBuffer {
     Raw(Arc<ImmutableBuffer<[Vertex]>>),
-    Text(TextBuffer),
+    Text(Arc<TextDrawable>),
 }
 
 pub struct DrawCommand {
@@ -186,7 +184,7 @@ impl DrawCommand {
     fn add_to_builder(self, pipeline: &GuiPipeline, builder: &mut AutoCommandBufferBuilder, dynamic_state: &DynamicState, screen_dimensions: [f32; 2]) {
         let vertex_buffer: Arc<dyn BufferAccess + Send + Sync> = match self.vertex_buffer {
             DrawVertexBuffer::Raw(buffer) => buffer,
-            DrawVertexBuffer::Text(buffer) => buffer,
+            DrawVertexBuffer::Text(drawable) => drawable.vertex_buffer.borrow().as_ref().unwrap().clone(),
         };
         let push_constants = vs::ty::PushConstants {
             screen_size: screen_dimensions,
@@ -207,7 +205,7 @@ impl DrawCommand {
 }
 
 pub trait Drawable {
-    fn draw(&self, context: &mut DrawContext<'_>, rect: Rect, color: Color);
+    fn draw(self: &Arc<Self>, context: &mut DrawContext<'_>, rect: Rect, color: Color);
 }
 
 pub struct SizedDrawable {
@@ -215,7 +213,7 @@ pub struct SizedDrawable {
 }
 
 impl Drawable for SizedDrawable {
-    fn draw(&self, context: &mut DrawContext<'_>, rect: Rect, color: Color) {
+    fn draw(self: &Arc<Self>, context: &mut DrawContext<'_>, rect: Rect, color: Color) {
         context.queue_draw(DrawCommand {
             vertex_buffer: DrawVertexBuffer::Raw(self.vertex_buffer.clone()),
             position: rect.position.into(),
@@ -229,7 +227,7 @@ pub struct TextDrawable {
     text_glyphs: Vec<PositionedGlyph<'static>>,
     width: f32,
     v_metrics: rusttype::VMetrics,
-    buffer: RefCell<Option<TextBuffer>>,
+    vertex_buffer: RefCell<Option<Arc<CpuAccessibleBuffer<[Vertex]>>>>,
 }
 
 impl TextDrawable {
@@ -237,7 +235,7 @@ impl TextDrawable {
         let last_glyph = text_glyphs.last().unwrap();
         let width = last_glyph.position().x + last_glyph.unpositioned().h_metrics().advance_width;
         let v_metrics = last_glyph.font().v_metrics(last_glyph.scale());
-        TextDrawable { text_glyphs, width, v_metrics, buffer: RefCell::new(None), }
+        TextDrawable { text_glyphs, width, v_metrics, vertex_buffer: RefCell::new(None), }
     }
 
     pub fn width(&self) -> f32 { self.width }
@@ -246,10 +244,9 @@ impl TextDrawable {
 }
 
 impl Drawable for TextDrawable {
-    fn draw(&self, context: &mut DrawContext<'_>, rect: Rect, color: Color) {
-        let buffer = self.buffer.borrow().as_ref().unwrap().clone();
+    fn draw(self: &Arc<Self>, context: &mut DrawContext<'_>, rect: Rect, color: Color) {
         context.queue_draw(DrawCommand {
-            vertex_buffer: DrawVertexBuffer::Text(buffer),
+            vertex_buffer: DrawVertexBuffer::Text(self.clone()),
             position: rect.position.into(),
             size: [1., 1.],
             color: encode_color(color),
@@ -267,7 +264,7 @@ impl<'a> DrawContext<'a> {
         self.subpass.square_drawable.clone()
     }
     pub fn new_text_drawable(&mut self, font: Font, size: f32, text: &str) -> Arc<TextDrawable> {
-        if text.is_empty() { panic!("text_drawable requires a non-empty string"); }
+        if text.is_empty() { panic!("TextDrawable requires a non-empty string"); }
         let font_asset = fonts().get(font);
         let glyphs: Vec<PositionedGlyph> = font_asset.layout(text, Scale::uniform(size), point(0., 0.)).collect();
         let drawable = Arc::new(TextDrawable::new(glyphs));
@@ -373,7 +370,7 @@ impl GuiSubpass {
             }).collect();
 
             // TODO use CpuBufferPool
-            drawable.buffer.replace(
+            drawable.vertex_buffer.replace(
                 Some(CpuAccessibleBuffer::from_iter(
                     self.device.clone(),
                     BufferUsage::vertex_buffer(),

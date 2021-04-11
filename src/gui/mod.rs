@@ -1,6 +1,9 @@
 pub mod color_rect;
 pub mod font;
 pub mod layout;
+pub mod text;
+
+use std::cell::Cell;
 
 use slotmap::{new_key_type, SecondaryMap};
 
@@ -20,8 +23,17 @@ pub trait Widget {
 }
 
 struct GuiItem {
-    rect: Rect,
+    rect: Cell<Rect>,
     layout: Layout,
+}
+
+impl GuiItem {
+    fn new() -> GuiItem {
+        GuiItem { rect: Cell::default(), layout: Layout::default() }
+    }
+    fn with_layout(layout: Layout) -> GuiItem {
+        GuiItem { rect: Cell::default(), layout }
+    }
 }
 
 struct GuiWidgets {
@@ -40,8 +52,8 @@ impl GuiWidgets {
             widget.draw(context, rect);
         }
         for child in forest.iter_children(node) {
-            let rect = forest.get(*child).rect;
-            self.draw_node(forest, context, *child, rect);
+            let child_rect = forest.get(*child).rect.get();
+            self.draw_node(forest, context, *child, child_rect);
         }
     }
 }
@@ -55,7 +67,7 @@ pub struct Gui {
 impl Gui {
     pub fn new() -> Gui {
         let mut forest = Forest::new();
-        let render_root = forest.add(GuiItem { rect: Rect::zero(), layout: Layout::default() });
+        let render_root = forest.add(GuiItem::new());
         Gui { forest, widgets: GuiWidgets::new(), render_root }
     }
 
@@ -69,14 +81,10 @@ impl Gui {
         self.forest.iter_children(node)
     }
 
-    pub fn add<W>(&mut self, parent: GuiNode, widget: W) -> GuiNode where W: Widget + 'static {
-        let node = self.forest.add_child(parent, GuiItem { rect: Rect::zero(), layout: Layout::default() });
+    pub fn add<W>(&mut self, parent: GuiNode, layout: Layout, widget: W) -> GuiNode where W: Widget + 'static {
+        let node = self.forest.add_child(parent, GuiItem::with_layout(layout));
         self.widgets.insert(node, widget);
         node
-    }
-    pub fn set_node_rect(&mut self, node: GuiNode, rect: Rect) {
-        let item = self.forest.get_mut(node);
-        item.rect = rect;
     }
     pub fn set_node_layout(&mut self, node: GuiNode, layout: Layout) {
         let item = self.forest.get_mut(node);
@@ -84,42 +92,44 @@ impl Gui {
     }
 
     pub fn draw(&mut self, context: &mut DrawContext) {
-        let root_rect = self.forest.get(self.render_root).rect;
+        let root_rect = self.forest.get(self.render_root).rect.get();
         self.widgets.draw_node(&self.forest, context, self.render_root, root_rect);
     }
 
-    pub fn layout_if_needed(&mut self, parent_size: Size) {
-        let root_rect = self.forest.get(self.render_root).rect;
+    pub fn layout_if_needed(&self, parent_size: Size) {
+        let root_rect = self.forest.get(self.render_root).rect.get();
         if root_rect.size != parent_size {
-            self.layout(self.render_root, Rect { position: Point::origin(), size: parent_size });
+            self.layout(self.render_root, Rect { position: Point::origin(), size: parent_size }, None);
         }
     }
-    fn layout(&mut self, node: GuiNode, parent_rect: Rect) {
+    fn layout(&self, node: GuiNode, parent_rect: Rect, previous_sibling_rect: Option<Rect>) -> Rect {
         let item = self.forest.get(node);
         let rect = if node == self.render_root {
             parent_rect
         } else {
-            item.layout.layout_before_children(&LayoutContext(&self.forest), node, parent_rect.position)
+            let context = LayoutContext { parent_rect, previous_sibling_rect };
+            item.layout.layout_before_children(&context)
         };
-        self.forest.get_mut(node).rect = rect;
-        // TODO this allocates a vector to avoid lifetime issues, try to optimize
-        for child in self.get_children(node) {
-            self.layout(child, rect);
+        item.rect.set(rect);
+        let mut previous_child_rect = None;
+        for child in self.iter_children(node) {
+            let child_rect = self.layout(*child, rect, previous_child_rect);
+            previous_child_rect = Some(child_rect);
         }
+        rect
     }
 }
 
-pub struct LayoutContext<'a>(&'a Forest<GuiNode, GuiItem>);
+pub struct LayoutContext {
+    parent_rect: Rect,
+    previous_sibling_rect: Option<Rect>,
+}
 
-impl<'a> LayoutContext<'a> {
-    fn get_rect(&self, node: GuiNode) -> Rect {
-        self.0.get(node).rect
+impl LayoutContext {
+    pub fn parent_rect(&self) -> Rect {
+        self.parent_rect
     }
-    pub fn get_parent_rect(&self, node: GuiNode) -> Rect {
-        let parent = self.0.get_parent(node);
-        self.get_rect(parent)
-    }
-    pub fn get_previous_sibling_rect(&self, _node: GuiNode) -> Rect {
-        unimplemented!();
+    pub fn previous_sibling_rect(&self) -> Rect {
+        self.previous_sibling_rect.expect("first child can't have PreviousSibling anchor")
     }
 }

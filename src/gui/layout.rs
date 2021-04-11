@@ -2,7 +2,7 @@ use std::convert::TryFrom;
 
 use crate::geometry2d::*;
 
-use super::{GuiNode, LayoutContext};
+use super::LayoutContext;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Side {
@@ -37,14 +37,17 @@ impl Side {
     }
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum AnchorTarget {
     None, Parent, PreviousSibling
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum AnchorTargetSide {
     SameSide, OppositeSide, Center
 }
 
+#[derive(Copy, Clone, Debug)]
 pub struct Anchor {
     pub target: AnchorTarget,
     pub target_side: AnchorTargetSide,
@@ -68,6 +71,12 @@ pub struct Layout {
 }
 
 impl Layout {
+    pub fn fill_parent(inset: i32) -> Layout {
+        let anchor = Anchor { target: AnchorTarget::Parent, target_side: AnchorTargetSide::SameSide, offset: inset };
+        Layout {
+            base_size: Size::zero(), anchors: [anchor; 4]
+        }
+    }
     pub fn with_base_size(base_size: Size) -> Layout {
         Layout {
             base_size, anchors: Default::default()
@@ -79,12 +88,12 @@ impl Layout {
 }
 
 impl Layout {
-    fn get_edge(&self, context: &LayoutContext, node: GuiNode, side: Side) -> Option<i32> {
+    fn get_edge(&self, context: &LayoutContext, side: Side) -> Option<i32> {
         let anchor = &self.anchors[side.to_index()];
         let target_rect = match anchor.target {
             AnchorTarget::None => return None,
-            AnchorTarget::Parent => context.get_parent_rect(node),
-            AnchorTarget::PreviousSibling => context.get_previous_sibling_rect(node),
+            AnchorTarget::Parent => context.parent_rect(),
+            AnchorTarget::PreviousSibling => context.previous_sibling_rect(),
         };
         let edge = match anchor.target_side {
             AnchorTargetSide::SameSide => side.rect_edge(target_rect),
@@ -98,11 +107,11 @@ impl Layout {
         Some(edge + offset)
     }
 
-    pub fn layout_before_children(&self, context: &LayoutContext, node: GuiNode, parent_position: Point) -> Rect {
-        let mut left_edge = self.get_edge(context, node, Side::Left);
-        let mut right_edge = self.get_edge(context, node, Side::Right);
-        let mut top_edge = self.get_edge(context, node, Side::Top);
-        let mut bottom_edge = self.get_edge(context, node, Side::Bottom);
+    pub fn layout_before_children(&self, context: &LayoutContext) -> Rect {
+        let mut left_edge = self.get_edge(context, Side::Left);
+        let mut right_edge = self.get_edge(context, Side::Right);
+        let mut top_edge = self.get_edge(context, Side::Top);
+        let mut bottom_edge = self.get_edge(context, Side::Bottom);
         if left_edge.is_some() && right_edge.is_none() {
             right_edge = Some(left_edge.unwrap() + self.base_size.width as i32);
         }
@@ -116,7 +125,7 @@ impl Layout {
             top_edge = Some(bottom_edge.unwrap() - self.base_size.height as i32);
         }
 
-        let mut rect = Rect { position: parent_position, size: self.base_size };
+        let mut rect = Rect { position: context.parent_rect().position, size: self.base_size };
         if left_edge.is_some() {
             rect.position.x = left_edge.unwrap();
             rect.size.width = u32::try_from(right_edge.unwrap() - left_edge.unwrap()).unwrap_or_default();

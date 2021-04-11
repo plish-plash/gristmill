@@ -39,9 +39,7 @@ impl Size {
     pub fn new(width: u32, height: u32) -> Size {
         Size { width, height }
     }
-    pub fn zero() -> Size {
-        Size { width: 0, height: 0 }
-    }
+    pub fn zero() -> Size { Self::default() }
 
     pub fn aspect(&self) -> f32 {
         self.width as f32 / self.height as f32
@@ -77,16 +75,14 @@ impl From<Size> for [f32; 2] {
 //     }
 // }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Default, Debug)]
 pub struct Rect {
     pub position: Point,
     pub size: Size,
 }
 
 impl Rect {
-    pub fn zero() -> Rect {
-        Rect { position: Point::origin(), size: Size::zero() }
-    }
+    pub fn zero() -> Rect { Self::default() }
 
     pub fn top_left(&self) -> Point {
         self.position

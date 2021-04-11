@@ -1,6 +1,6 @@
 use winit::window::Window;
 use gristmill::game::{Game, run_game};
-use gristmill::gui::{Gui, color_rect::ColorRect, layout::*};
+use gristmill::gui::{Gui, color_rect::ColorRect, text::{Text, Align}, layout::*};
 use gristmill::renderer::{RendererSetup, RendererLoader, RenderPass, RenderPassInfo, pass, subpass};
 use gristmill::color::Color;
 use gristmill::geometry2d::*;
@@ -16,12 +16,15 @@ impl Game for GuiGame {
     type RenderPass = pass::GeometryGuiPass<subpass::example::ExampleSubpass, subpass::gui::GuiSubpass>;
 
     fn load(&mut self, (_, gui): &mut Scene, renderer_setup: &mut RendererSetup) -> RenderPassInfo<Self::RenderPass> {
-        let color_rect = gui.add(gui.root(), ColorRect::new(Color::new(0., 1., 0., 1.)));
         let mut layout = Layout::with_base_size(Size { width: 128, height: 128 });
         layout.set_anchor(Side::Top, Anchor { target: AnchorTarget::Parent, target_side: AnchorTargetSide::SameSide, offset: 64 });
         layout.set_anchor(Side::Left, Anchor { target: AnchorTarget::Parent, target_side: AnchorTargetSide::SameSide, offset: 32 });
         layout.set_anchor(Side::Right, Anchor { target: AnchorTarget::Parent, target_side: AnchorTargetSide::SameSide, offset: 32 });
-        gui.set_node_layout(color_rect, layout);
+        let color_rect = gui.add(gui.root(), layout, ColorRect::new(Color::new(0., 1., 0., 1.)));
+        let mut text = Text::new();
+        text.set_text("Hello".to_string());
+        text.set_alignment(Align::Middle, Align::Middle);
+        gui.add(color_rect, Layout::fill_parent(0), text);
 
         Self::RenderPass::new(renderer_setup)
     }
@@ -36,5 +39,6 @@ impl Game for GuiGame {
 }
 
 fn main() {
+    gristmill::gui::font::load_fonts(vec!["fonts/DejaVuSans".to_string()]); // TODO fonts should be autoloaded
     run_game(GuiGame, ((), Gui::new()))
 }
