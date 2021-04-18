@@ -17,9 +17,12 @@ impl Point {
     }
     pub fn origin() -> Point { Self::default() }
 
-    pub fn offset(&mut self, other: Point) {
-        self.x += other.x;
-        self.y += other.y;
+    // pub fn offset(&mut self, other: Point) {
+    //     self.x += other.x;
+    //     self.y += other.y;
+    // }
+    pub fn relative_to(self, other: Point) -> Point {
+        Point { x: self.x - other.x, y: self.y - other.y }
     }
 }
 

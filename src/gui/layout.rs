@@ -55,12 +55,14 @@ pub struct Anchor {
 }
 
 impl Default for Anchor {
-    fn default() -> Self {
-        Anchor {
-            target: AnchorTarget::None,
-            target_side: AnchorTargetSide::SameSide,
-            offset: 0,
-        }
+    fn default() -> Anchor {
+        Anchor { target: AnchorTarget::None, target_side: AnchorTargetSide::SameSide, offset: 0 }
+    }
+}
+
+impl Anchor {
+    pub fn parent(offset: i32) -> Anchor {
+        Anchor { target: AnchorTarget::Parent, target_side: AnchorTargetSide::SameSide, offset }
     }
 }
 

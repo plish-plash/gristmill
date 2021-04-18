@@ -25,6 +25,30 @@ pub enum InputState {
     Axis2(Axis2),
 }
 
+impl InputState {
+    fn to_button(self) -> bool {
+        match self {
+            InputState::Button(b) => b,
+            InputState::Axis1(v) => v.abs() >= 0.5,
+            InputState::Axis2(_) => panic!("axis2 input can't be bound to button action"),
+        }
+    }
+    fn to_axis1(self) -> f32 {
+        match self {
+            InputState::Button(b) => if b { 1.0 } else { 0.0 },
+            InputState::Axis1(v) => v,
+            InputState::Axis2(_) => panic!("axis2 input can't be bound to axis1 action"),
+        }
+    }
+    fn to_axis2(self) -> Axis2 {
+        match self {
+            InputState::Button(_) => panic!("button input can't be bound to axis2 action"),
+            InputState::Axis1(v) => Axis2 { x: v, y: 0.0 },
+            InputState::Axis2(v) => v,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct ActionState {
     state: InputState,
@@ -32,17 +56,11 @@ pub struct ActionState {
 }
 
 impl ActionState {
+    fn new(state: InputState) -> ActionState {
+        ActionState { state, mouse_position: None }
+    }
     fn new_button() -> ActionState {
-        Self::from_button(false)
-    }
-    fn from_button(value: bool) -> ActionState {
-        ActionState { state: InputState::Button(value), mouse_position: None }
-    }
-    fn from_axis1(value: f32) -> ActionState {
-        ActionState { state: InputState::Axis1(value), mouse_position: None }
-    }
-    fn from_axis2(value: Axis2) -> ActionState {
-        ActionState { state: InputState::Axis2(value), mouse_position: None }
+        Self::new(InputState::Button(false))
     }
     fn set_mouse_position(&mut self, mouse_position: PhysicalPosition<f64>) {
         let point = Point::nearest(mouse_position.x as f32, mouse_position.y as f32);
@@ -64,14 +82,23 @@ impl<T> Action<T> where T: Copy {
     pub fn get(&self) -> T { self.state }
 }
 impl<T> Action<T> where T: PartialEq {
-    pub fn set_state(&mut self, state: ActionState) {
-        // if self.state != state.state {
-        //     self.state = state.state;
-        //     self.changed = true;
-        // }
+    fn set_state_value(&mut self, state: T) {
+        if self.state != state {
+            self.state = state;
+            self.changed = true;
+        }
     }
 }
+impl<T> Default for Action<T> where T: Default {
+    fn default() -> Action<T> {
+        Action { state: T::default(), changed: false }
+    }
+}
+
 impl Action<bool> {
+    pub fn set_state(&mut self, state: ActionState) {
+        self.set_state_value(state.state.to_button());
+    }
     pub fn pressed(&self) -> bool {
         self.state && self.changed
     }
@@ -79,9 +106,14 @@ impl Action<bool> {
         !self.state && self.changed
     }
 }
-impl<T> Default for Action<T> where T: Default {
-    fn default() -> Action<T> {
-        Action { state: T::default(), changed: false }
+impl Action<f32> {
+    pub fn set_state(&mut self, state: ActionState) {
+        self.set_state_value(state.state.to_axis1());
+    }
+}
+impl Action<Axis2> {
+    pub fn set_state(&mut self, state: ActionState) {
+        self.set_state_value(state.state.to_axis2());
     }
 }
 
@@ -131,7 +163,7 @@ impl Binding for KeyboardBinding {
         false
     }
     fn state(&self) -> ActionState {
-        ActionState::from_button(self.pressed)
+        ActionState::new(InputState::Button(self.pressed))
     }
 }
 
@@ -171,7 +203,7 @@ impl Binding for KeyboardCompositeBinding {
         if self.directions[CompositeDirection::Down.to_index()].pressed { y -= 1.0; }
         if self.directions[CompositeDirection::Left.to_index()].pressed { x -= 1.0; }
         if self.directions[CompositeDirection::Right.to_index()].pressed { x += 1.0; }
-        ActionState::from_axis2(Axis2 { x, y })
+        ActionState::new(InputState::Axis2(Axis2 { x, y }))
     }
 }
 
@@ -217,7 +249,7 @@ impl Binding for MouseMotionBinding {
         false
     }
     fn state(&self) -> ActionState {
-        ActionState::from_axis2(self.motion)
+        ActionState::new(InputState::Axis2(self.motion))
     }
 }
 
@@ -266,10 +298,10 @@ pub struct InputSystem {
 }
 
 impl InputSystem {
-    pub fn new(bindings: InputBindings) -> InputSystem {
+    pub(crate) fn new(bindings: InputBindings) -> InputSystem {
         InputSystem { bindings, event_system: event::EventSystem::new(), has_dispatched: false }
     }
-    pub fn start_frame(&mut self) {
+    pub(crate) fn start_frame(&mut self) {
         // MouseMotionBindings work differently than others. The values are accumulated over each frame, then reset.
         for (index, (_, binding)) in self.bindings.bindings.iter_mut().enumerate() {
             if let BindingEnum::MouseMotion(binding) = binding {
@@ -287,7 +319,7 @@ impl InputSystem {
         });
         self.has_dispatched = true;
     }
-    pub fn end_frame(&mut self) {
+    pub(crate) fn end_frame(&mut self) {
         if self.has_dispatched {
             self.has_dispatched = false;
         }
@@ -295,7 +327,7 @@ impl InputSystem {
             self.event_system.discard_queue();
         }
     }
-    pub fn input_event(&mut self, event: Event<()>) {
+    pub(crate) fn input_event(&mut self, event: Event<()>) {
         // TODO do some matching so we're not checking every event against every binding
         for (index, (_, binding)) in self.bindings.bindings.iter_mut().enumerate() {
             if binding.event(&event) {

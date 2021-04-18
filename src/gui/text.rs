@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::sync::Arc;
 
 use crate::color::Color;
@@ -61,6 +62,7 @@ impl Text {
 }
 
 impl Widget for Text {
+    fn as_any(&mut self) -> &mut dyn Any { self }
     fn draw(&mut self, context: &mut DrawContext, rect: Rect) {
         if self.text_changed {
             self.drawable = Some(context.new_text_drawable(self.font, self.size, &self.text));

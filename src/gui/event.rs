@@ -1,12 +1,12 @@
 use crate::event;
-
+use crate::geometry2d::Point;
 use super::GuiNode;
 
 // -------------------------------------------------------------------------------------------------
 
 pub enum GuiInputEvent {
-    CursorMoved(f32, f32),
-    PrimaryButton,
+    CursorMoved(Point),
+    PrimaryButton(bool),
 }
 
 impl event::Event for GuiInputEvent {}
