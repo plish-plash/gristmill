@@ -1,17 +1,19 @@
 pub mod color_rect;
+pub mod event;
 pub mod font;
 pub mod layout;
 pub mod text;
 
 use std::cell::Cell;
 
-use slotmap::{new_key_type, SecondaryMap};
+use slotmap::{new_key_type, Key, SecondaryMap};
 
 use crate::geometry2d::*;
 use crate::forest::Forest;
 
 use layout::Layout;
 
+pub use event::*;
 pub use super::renderer::subpass::gui::{DrawContext, Drawable, SizedDrawable, TextDrawable};
 
 new_key_type! {
@@ -20,6 +22,9 @@ new_key_type! {
 
 pub trait Widget {
     fn draw(&mut self, context: &mut DrawContext, rect: Rect);
+    fn handle_input(&mut self, _event_system: &mut GuiEventSystem, _input: &GuiInputEvent) -> bool { false }
+    fn set_hovered(&mut self, _hovered: bool) {}
+    fn set_focused(&mut self, _focused: bool) {}
 }
 
 struct GuiItem {
@@ -47,13 +52,42 @@ impl GuiWidgets {
     fn insert<W>(&mut self, node: GuiNode, widget: W) where W: Widget + 'static {
         self.widgets.insert(node, Box::new(widget));
     }
-    fn draw_node(&mut self, forest: &Forest<GuiNode, GuiItem>, context: &mut DrawContext, node: GuiNode, rect: Rect) {
+    fn draw_node(&mut self, forest: &Forest<GuiNode, GuiItem>, node: GuiNode, context: &mut DrawContext, rect: Rect) {
         if let Some(widget) = self.widgets.get_mut(node) {
             widget.draw(context, rect);
         }
         for child in forest.iter_children(node) {
             let child_rect = forest.get(*child).rect.get();
-            self.draw_node(forest, context, *child, child_rect);
+            self.draw_node(forest, *child, context, child_rect);
+        }
+    }
+    fn handle_input(&mut self, forest: &Forest<GuiNode, GuiItem>, node: GuiNode, event_system: &mut GuiEventSystem, input: &GuiInputEvent) -> bool {
+        for child in forest.iter_children(node) {
+            if self.handle_input(forest, *child, event_system, input) {
+                return true;
+            }
+        }
+        if let Some(widget) = self.widgets.get_mut(node) {
+            widget.handle_input(event_system, input)
+        }
+        else { false }
+    }
+}
+
+struct GuiInputState {
+    hovered: GuiNode,
+    focused: GuiNode,
+}
+
+impl GuiInputState {
+    fn new() -> GuiInputState {
+        GuiInputState { hovered: GuiNode::null(), focused: GuiNode::null() }
+    }
+    fn handle_event(&mut self, event: &GuiActionEvent) {
+        match event {
+            GuiActionEvent::Hover(node) => self.hovered = *node,
+            GuiActionEvent::Focus(node) => self.focused = *node,
+            _ => (),
         }
     }
 }
@@ -61,14 +95,22 @@ impl GuiWidgets {
 pub struct Gui {
     forest: Forest<GuiNode, GuiItem>,
     widgets: GuiWidgets,
+    input_state: GuiInputState,
     render_root: GuiNode,
+    event_system: GuiEventSystem,
 }
 
 impl Gui {
     pub fn new() -> Gui {
         let mut forest = Forest::new();
         let render_root = forest.add(GuiItem::new());
-        Gui { forest, widgets: GuiWidgets::new(), render_root }
+        Gui {
+            forest,
+            input_state: GuiInputState::new(),
+            widgets: GuiWidgets::new(),
+            render_root,
+            event_system: GuiEventSystem::new(),
+        }
     }
 
     pub fn root(&self) -> GuiNode {
@@ -93,7 +135,7 @@ impl Gui {
 
     pub fn draw(&mut self, context: &mut DrawContext) {
         let root_rect = self.forest.get(self.render_root).rect.get();
-        self.widgets.draw_node(&self.forest, context, self.render_root, root_rect);
+        self.widgets.draw_node(&self.forest, self.render_root, context, root_rect);
     }
 
     pub fn layout_if_needed(&self, parent_size: Size) {
@@ -117,6 +159,17 @@ impl Gui {
             previous_child_rect = Some(child_rect);
         }
         rect
+    }
+
+    fn fire_input(&mut self, input: GuiInputEvent) {
+        self.widgets.handle_input(&self.forest, self.render_root, &mut self.event_system, &input);
+    }
+    pub fn process_input<F>(&mut self, mut handler: F) where F: FnMut(GuiActionEvent) {
+        let input_state = &mut self.input_state;
+        self.event_system.dispatch_queue(move |event| {
+            input_state.handle_event(&event);
+            handler(event);
+        });
     }
 }
 

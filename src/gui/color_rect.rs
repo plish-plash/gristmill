@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::color::Color;
 use crate::geometry2d::Rect;
-use super::{Widget, DrawContext, Drawable, SizedDrawable};
+use super::{Widget, DrawContext, Drawable, SizedDrawable, GuiEventSystem, GuiInputEvent};
 
 pub struct ColorRect {
     pub color: Color,
@@ -22,4 +22,5 @@ impl Widget for ColorRect {
         }
         self.drawable.as_mut().unwrap().draw(context, rect, self.color);
     }
+    fn handle_input(&mut self, _event_system: &mut GuiEventSystem, _input: &GuiInputEvent) -> bool { true }
 }

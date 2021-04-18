@@ -18,14 +18,6 @@ pub trait InputActions {
     fn set_action_state(&mut self, target: &str, state: ActionState);
 }
 
-impl<T> event::EventHandler<InputEvent> for T where T: InputActions {
-    type Context = InputBindings;
-    fn handle_event(&mut self, _system: &mut event::EventSystem<InputEvent>, bindings: &mut InputBindings, event: InputEvent) {
-        let (target, binding) = &bindings.bindings[event.binding_index];
-        self.set_action_state(target, binding.state());
-    }
-}
-
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum InputState {
     Button(bool),
@@ -288,7 +280,11 @@ impl InputSystem {
     }
     pub fn dispatch_queue<T: InputActions>(&mut self, actions: &mut T) {
         actions.end_frame();
-        self.event_system.dispatch_queue(actions, &mut self.bindings);
+        let bindings = &self.bindings;
+        self.event_system.dispatch_queue(move |event| {
+            let (target, binding) = &bindings.bindings[event.binding_index];
+            actions.set_action_state(target, binding.state());
+        });
         self.has_dispatched = true;
     }
     pub fn end_frame(&mut self) {

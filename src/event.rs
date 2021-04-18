@@ -16,19 +16,12 @@ impl<E> EventSystem<E> where E: Event {
     pub fn fire_event(&mut self, event: E) {
         self.queue.push(event);
     }
-    pub fn dispatch_queue<H>(&mut self, handler: &mut H, context: &mut H::Context) where H: EventHandler<E> {
-        while !self.queue.is_empty() {
-            for event in self.queue.split_off(0) {
-                handler.handle_event(self, context, event);
-            }
+    pub fn dispatch_queue<F>(&mut self, mut handler: F) where F: FnMut(E) {
+        for event in self.queue.drain(..) {
+            handler(event);
         }
     }
     pub fn discard_queue(&mut self) {
         self.queue.clear();
     }
-}
-
-pub trait EventHandler<E: Event> {
-    type Context;
-    fn handle_event(&mut self, system: &mut EventSystem<E>, context: &mut Self::Context, event: E);
 }
