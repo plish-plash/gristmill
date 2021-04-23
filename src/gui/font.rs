@@ -1,7 +1,7 @@
 use std::sync::Once;
 use std::path::{Path, PathBuf};
 
-use crate::asset::{Asset, AssetCategory, load_asset};
+use crate::asset::{Asset, AssetCategory, AssetResult, AssetError, load_asset};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -23,7 +23,7 @@ pub fn load_fonts(asset_paths: Vec<String>) {
     FONTS_INIT.call_once(|| {
         // TODO error handling
         let fonts: Vec<FontAsset> = asset_paths.iter().map(|path|
-            load_asset((), path)
+            load_asset(path)
         ).collect::<Result<_, _>>().unwrap();
         unsafe {
             FONTS = Some(FontStore::new(fonts));
@@ -73,13 +73,12 @@ struct FontAsset {
 }
 
 impl Asset for FontAsset {
-    type AssetStore = ();
     fn category() -> AssetCategory { AssetCategory::Asset }
     fn file_extension() -> &'static str { "ttf" }
-    fn load(_store: (), file_path: PathBuf) -> std::io::Result<Self> {
+    fn load(file_path: PathBuf) -> AssetResult<Self> {
         let font = match rusttype::Font::try_from_vec(std::fs::read(&file_path)?) {
             Some(f) => f,
-            None => return Err(std::io::Error::from(std::io::ErrorKind::InvalidData)),
+            None => return Err(AssetError::new_data()),
         };
         Ok(FontAsset {
             font,
