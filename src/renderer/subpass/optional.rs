@@ -2,6 +2,7 @@ use super::{RenderSubpass, SubpassSetup, SubpassContents, AutoCommandBufferBuild
 
 // -------------------------------------------------------------------------------------------------
 
+// TODO get rid of this and just use Option
 pub struct Optional<T> where T: RenderSubpass {
     inner: Option<T>
 }

@@ -4,6 +4,7 @@ pub mod event;
 pub mod font;
 pub mod layout;
 pub mod text;
+pub mod texture_rect;
 
 use std::any::Any;
 use std::cell::Cell;
@@ -17,7 +18,7 @@ use crate::input::CursorAction;
 use layout::Layout;
 
 pub use event::*;
-pub use super::renderer::subpass::gui::{DrawContext, Drawable, TextMetrics};
+pub use super::renderer::subpass::gui::{DrawContext, Drawable, Texture, TextMetrics};
 
 new_key_type! {
     pub struct GuiNode;

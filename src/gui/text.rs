@@ -36,7 +36,7 @@ impl Text {
         Text {
             font: Font::default(),
             size: 14.,
-            color: crate::color::black(),
+            color: crate::color::white(),
             align: (Align::Start, Align::End),
             text: String::new(),
             text_changed: false,

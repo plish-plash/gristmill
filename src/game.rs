@@ -7,7 +7,7 @@ use winit::{
 };
 
 use super::asset::load_asset;
-use super::renderer::{RendererSetup, RendererLoader, Renderer, RenderLoop, RenderPass, RenderPassInfo};
+use super::renderer::{RendererSetup, RendererLoader, Renderer, RenderLoop, RenderPass};
 use super::input::{InputSystem, InputBindings};
 use super::geometry2d::Size;
 
@@ -65,9 +65,9 @@ pub trait GameLoop: Sized + 'static {
 
 pub trait Game {
     type RenderPass: RenderPass;
-    fn load(&mut self, scene: &mut <Self::RenderPass as RenderPass>::Scene, renderer_setup: &mut RendererSetup) -> RenderPassInfo<Self::RenderPass>;
+    fn load(&mut self, scene: &mut <Self::RenderPass as RenderPass>::Scene, renderer_setup: &mut RendererSetup) -> Self::RenderPass;
     fn update(&mut self, scene: &mut <Self::RenderPass as RenderPass>::Scene, window: &Window, input_system: &mut InputSystem, delta: f64) -> bool;
-    fn update_renderer(&mut self, scene: &mut <Self::RenderPass as RenderPass>::Scene, render_pass: &mut RenderPassInfo<Self::RenderPass>, loader: &mut RendererLoader);
+    fn update_renderer(&mut self, scene: &mut <Self::RenderPass as RenderPass>::Scene, render_pass: &mut Self::RenderPass, loader: &mut RendererLoader);
     fn resize(&mut self, scene: &mut <Self::RenderPass as RenderPass>::Scene, dimensions: Size);
 }
 

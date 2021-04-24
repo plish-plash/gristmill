@@ -54,7 +54,7 @@ impl<V> PipelineData<V> where V: Vertex + Send + Sync + 'static {
         self.square_vertex_buffer.clone()
     }
     
-    pub fn upload_texture(&mut self, subpass_setup: &mut SubpassSetup, image: &Image, filter: Filter) -> Texture {
+    pub fn load_image(&mut self, subpass_setup: &mut SubpassSetup, image: &Image, filter: Filter) -> Texture {
         let image_size = image.size();
         let dimensions = ImageDimensions::Dim2d {
             width: image_size.width,

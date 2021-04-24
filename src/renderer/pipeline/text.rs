@@ -6,7 +6,7 @@ use vulkano::descriptor::descriptor_set::{DescriptorSet, PersistentDescriptorSet
 use vulkano::descriptor::pipeline_layout::PipelineLayoutAbstract;
 use vulkano::device::DeviceOwned;
 use vulkano::format::R8Unorm;
-use vulkano::image::{AttachmentImage, ImageUsage};
+use vulkano::image::{StorageImage, ImageUsage, ImageDimensions, ImageCreateFlags};
 use vulkano::image::view::ImageView;
 use vulkano::sampler::{Sampler, Filter, MipmapMode, SamplerAddressMode};
 
@@ -34,7 +34,7 @@ struct Section<V: Vertex> {
 pub struct PipelineData<V: Vertex> {
     cache: Cache<'static>,
     cache_pixel_buffer: Vec<u8>,
-    cache_image: Arc<AttachmentImage<R8Unorm>>,
+    cache_image: Arc<StorageImage<R8Unorm>>,
     descriptor_set: Arc<dyn DescriptorSet + Send + Sync>,
     sections: HandleOwner<Handle, Section<V>>,
 }
@@ -44,17 +44,19 @@ impl<V> PipelineData<V> where V: Vertex + 'static {
         let cache = Cache::builder().dimensions(TEXT_CACHE_WIDTH, TEXT_CACHE_HEIGHT).build();
         let cache_pixel_buffer = vec!(0; (TEXT_CACHE_WIDTH * TEXT_CACHE_HEIGHT) as usize);
 
-        // Note: because this is an AttachmentImage, the color_attachment usage is added implicitly, which is unneeded.
-        // However, Vulkano doesn't provide a "DeviceLocalImage", so this is what we've got.
-        let cache_image = AttachmentImage::with_usage(
+        // TODO need to set VkComponentMapping on the image view so that the single red value is used for all rgba in the shader.
+        // Vulkano 0.22 doesn't have the API for this, but the repo version does.
+        let cache_image = StorageImage::with_usage(
             subpass_setup.device(),
-            [TEXT_CACHE_WIDTH, TEXT_CACHE_HEIGHT],
+            ImageDimensions::Dim2d { width: TEXT_CACHE_WIDTH, height: TEXT_CACHE_HEIGHT, array_layers: 1 },
             R8Unorm,
             ImageUsage {
                 sampled: true,
                 transfer_destination: true,
                 .. ImageUsage::none()
             },
+            ImageCreateFlags::none(),
+            vec![subpass_setup.queue().family()], // TODO should be BOTH graphics and transfer queue families.
         ).unwrap();
         let cache_image_view = ImageView::new(cache_image.clone()).unwrap();
 

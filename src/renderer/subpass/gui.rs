@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use vulkano::buffer::BufferAccess;
+use vulkano::buffer::{ImmutableBuffer, BufferAccess};
 use vulkano::command_buffer::{DynamicState, AutoCommandBufferBuilder, SubpassContents};
 use vulkano::descriptor::descriptor_set::DescriptorSet;
 use vulkano::pipeline::GraphicsPipeline;
@@ -11,7 +11,7 @@ use rusttype::{PositionedGlyph, Scale, point};
 
 use crate::asset::image::Image;
 use crate::color::{Color, encode_color};
-use crate::renderer::{PipelineArc, SubpassSetup, subpass::{self, Pipeline, RenderSubpass}, pipeline::{text, textured_rect}};
+use crate::renderer::{PipelineArc, SubpassSetup, subpass::{self, Pipeline, RenderSubpass}, pipeline::{text, texture_rect}};
 use crate::gui::{Gui, font::{Font, fonts}};
 use crate::geometry2d::{Rect, Size};
 
@@ -22,7 +22,7 @@ struct Vertex {
 }
 vulkano::impl_vertex!(Vertex, position, tex_position);
 
-impl textured_rect::Vertex for Vertex {
+impl texture_rect::Vertex for Vertex {
     fn new(x: f32, y: f32) -> Vertex {
         Vertex {
             position: [x, y],
@@ -37,6 +37,25 @@ impl text::Vertex for Vertex {
             position: [position[0] as f32, position[1] as f32],
             tex_position,
         }
+    }
+}
+
+#[derive(Clone)]
+pub struct Texture(texture_rect::Texture);
+
+#[derive(Clone)]
+pub struct NineSliceTexture {
+    texture: Texture,
+    vertex_buffer: Arc<ImmutableBuffer<[Vertex]>>,
+}
+
+impl NineSliceTexture {
+    fn get_draw_tuple(&self, outer_size: Size) -> (DrawVertexBuffer, Arc<dyn DescriptorSet + Send + Sync>, Size) {
+        (
+            DrawVertexBuffer::Buffer(self.vertex_buffer.clone()),
+            self.texture.0.descriptor_set(),
+            outer_size // TODO should be inner size
+        )
     }
 }
 
@@ -81,7 +100,7 @@ mod fs {
             layout(set = 0, binding = 0) uniform sampler2D tex;
 
             void main() {
-                f_color = v_color * texture(tex, v_tex_position)[0];
+                f_color = v_color * texture(tex, v_tex_position);
             }
         "
     }
@@ -89,10 +108,10 @@ mod fs {
 
 pub struct GuiPipeline {
     pipeline: PipelineArc,
-    textured_rect: textured_rect::PipelineData<Vertex>,
+    texture_rect: texture_rect::PipelineData<Vertex>,
     text: text::PipelineData<Vertex>,
 
-    white_1x1: textured_rect::Texture,
+    white_1x1: Texture,
 }
 
 impl GuiPipeline {
@@ -113,12 +132,12 @@ impl GuiPipeline {
                 .unwrap()
         );
 
-        let mut textured_rect = textured_rect::PipelineData::new(pipeline.clone(), subpass_setup);
-        let white_1x1 = textured_rect.upload_texture(subpass_setup, &Image::new_1x1_white(), Filter::Nearest);
+        let mut texture_rect = texture_rect::PipelineData::new(pipeline.clone(), subpass_setup);
+        let white_1x1 = Texture(texture_rect.load_image(subpass_setup, &Image::new_1x1_white(), Filter::Nearest));
 
         let text = text::PipelineData::new(pipeline.clone(), subpass_setup);
 
-        GuiPipeline { pipeline, textured_rect, text, white_1x1 }
+        GuiPipeline { pipeline, texture_rect, text, white_1x1 }
     }
 }
 
@@ -128,6 +147,7 @@ impl Pipeline for GuiPipeline {
 
 enum DrawVertexBuffer {
     Square,
+    Buffer(Arc<dyn BufferAccess + Send + Sync>),
     Text(Arc<text::Handle>),
 }
 
@@ -144,7 +164,8 @@ pub struct DrawCommand {
 impl DrawCommand {
     fn add_to_builder(self, pipeline: &GuiPipeline, builder: &mut AutoCommandBufferBuilder, dynamic_state: &DynamicState, screen_dimensions: [f32; 2]) {
         let vertex_buffer: Arc<dyn BufferAccess + Send + Sync> = match self.vertex_buffer {
-            DrawVertexBuffer::Square => pipeline.textured_rect.square_vertex_buffer(),
+            DrawVertexBuffer::Square => pipeline.texture_rect.square_vertex_buffer(),
+            DrawVertexBuffer::Buffer(buffer) => buffer,
             DrawVertexBuffer::Text(handle) => pipeline.text.get_section_vertex_buffer(&handle),
         };
         let push_constants = vs::ty::PushConstants {
@@ -167,7 +188,8 @@ impl DrawCommand {
 
 #[derive(Clone)]
 pub enum Drawable {
-    TexturedRect(textured_rect::Texture),
+    TextureRect(Texture),
+    TextureNineSlice(NineSliceTexture),
     Text(Arc<text::Handle>),
 }
 
@@ -198,7 +220,13 @@ pub struct DrawContext<'a> {
 
 impl<'a> DrawContext<'a> {
     pub fn new_color_rect_drawable(&mut self) -> Drawable {
-        Drawable::TexturedRect(self.pipeline.white_1x1.clone())
+        Drawable::TextureRect(self.pipeline.white_1x1.clone())
+    }
+    pub fn new_texture_rect_drawable(&mut self, texture: Texture) -> Drawable {
+        Drawable::TextureRect(texture)
+    }
+    pub fn new_texture_nine_slice_drawable(&mut self, texture: NineSliceTexture) -> Drawable {
+        Drawable::TextureNineSlice(texture)
     }
     pub fn new_text_drawable(&mut self, font: Font, size: f32, text: &str) -> (Drawable, TextMetrics) {
         if text.is_empty() { panic!("TextDrawable requires a non-empty string"); }
@@ -212,7 +240,8 @@ impl<'a> DrawContext<'a> {
 
     pub fn draw(&mut self, drawable: &Drawable, rect: Rect, color: Color) {
         let (vertex_buffer, descriptor_set, size) = match drawable {
-            Drawable::TexturedRect(texture) => (DrawVertexBuffer::Square, texture.descriptor_set(), rect.size),
+            Drawable::TextureRect(texture) => (DrawVertexBuffer::Square, texture.0.descriptor_set(), rect.size),
+            Drawable::TextureNineSlice(texture) => texture.get_draw_tuple(rect.size),
             Drawable::Text(handle) => (DrawVertexBuffer::Text(handle.clone()), self.pipeline.text.descriptor_set(), Size::new(1, 1)),
         };
         self.pending_draw_commands.push(DrawCommand {
@@ -243,6 +272,13 @@ impl GuiSubpass {
         self.pending_draw_commands.clear();
         DrawContext { pipeline: &mut self.pipeline, pending_draw_commands: &mut self.pending_draw_commands, text_changed: false }
     }
+
+    pub fn load_image(&mut self, subpass_setup: &mut SubpassSetup, image: &Image) -> Texture {
+        Texture(self.pipeline.texture_rect.load_image(subpass_setup, image, Filter::Linear))
+    }
+    // pub fn load_nine_slice_image(&mut self, subpass_setup: &mut SubpassSetup, image: &NineSliceImage) -> Texture {
+    //     self.pipeline.texture_rect.load_image(subpass_setup, image, Filter::Linear);
+    // }
 }
 
 impl RenderSubpass for GuiSubpass {

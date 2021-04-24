@@ -1,7 +1,8 @@
 use winit::window::Window;
+use gristmill::asset::{load_asset, image::Image};
 use gristmill::game::{Game, run_game};
-use gristmill::gui::{Gui, WidgetNode, GuiInputActions, GuiActionEvent, color_rect::ColorRect, button::ButtonBuilder, text::Text, layout::*};
-use gristmill::renderer::{RendererSetup, RendererLoader, pass, subpass};
+use gristmill::gui::{Gui, WidgetNode, GuiInputActions, GuiActionEvent, texture_rect::TextureRect, button::ButtonBuilder, text::Text, layout::*};
+use gristmill::renderer::{RendererSetup, RendererLoader, RenderPass, pass, subpass};
 use gristmill::color::Color;
 use gristmill::geometry2d::*;
 use gristmill::input::{InputSystem, InputActions, CursorAction, ActionState};
@@ -47,25 +48,30 @@ impl Game for GuiGame {
     type RenderPass = pass::GeometryGuiPass<subpass::example::ExampleSubpass, subpass::gui::GuiSubpass>;
 
     fn load(&mut self, (_, gui): &mut Scene, renderer_setup: &mut RendererSetup) -> Self::RenderPass {
+        let mut render_pass = Self::RenderPass::with_clear_color(renderer_setup, Color::new(0.0, 0.8, 0.8, 1.0));
+        let mut gui_subpass_setup = renderer_setup.subpass_setup(render_pass.pass_info(), 1);
+        let frame_image: Image = load_asset("images/FrameRounded").unwrap();
+        let frame_texture = render_pass.subpass1().load_image(&mut gui_subpass_setup, &frame_image);
+
         let mut layout = Layout::with_base_size(Size { width: 128, height: 128 });
         layout.set_anchor(Side::Top, Anchor::parent(64));
         layout.set_anchor(Side::Left, Anchor::parent(32));
         layout.set_anchor(Side::Right, Anchor::parent(32));
-        let color_rect = gui.add(gui.root(), layout, ColorRect::new(Color::new(0., 0., 1., 1.)));
+        let texture_rect = gui.add(gui.root(), layout, TextureRect::new(frame_texture));
         
         let mut layout = Layout::with_base_size(Size { width: 128, height: 32 });
         layout.set_anchor(Side::Top, Anchor::parent(16));
         layout.set_anchor(Side::Left, Anchor::parent(16));
         ButtonBuilder::new()
             .with_text("Hello".to_string())
-            .build(gui, color_rect.into(), layout);
+            .build(gui, texture_rect.into(), layout);
         
         let mut layout = Layout::with_base_size(Size { width: 128, height: 32 });
         layout.set_anchor(Side::Top, Anchor { target: AnchorTarget::PreviousSibling, target_side: AnchorTargetSide::OppositeSide, offset: 0 });
         layout.set_anchor(Side::Left, Anchor { target: AnchorTarget::PreviousSibling, target_side: AnchorTargetSide::SameSide, offset: 0 });
-        self.text = Some(gui.add(color_rect.into(), layout, Text::new()));
+        self.text = Some(gui.add(texture_rect.into(), layout, Text::new()));
 
-        Self::RenderPass::new(renderer_setup)
+        render_pass
     }
 
     fn update(&mut self, (_, gui): &mut Scene, _window: &Window, input_system: &mut InputSystem, _delta: f64) -> bool {

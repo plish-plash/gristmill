@@ -34,7 +34,7 @@ use super::game::{Game, GameLoop};
 use super::input::InputSystem;
 use super::geometry2d::Size;
 
-pub use pass::{RenderPass, RenderPassInfo};
+pub use pass::RenderPass;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -269,7 +269,7 @@ impl Renderer {
 
 pub(crate) struct RenderLoop<G> where G: Game {
     renderer: Renderer,
-    render_pass: RenderPassInfo<G::RenderPass>,
+    render_pass: G::RenderPass,
     game: G,
     scene: <G::RenderPass as RenderPass>::Scene,
     input_system: InputSystem,
@@ -279,9 +279,9 @@ pub(crate) struct RenderLoop<G> where G: Game {
 }
 
 impl<G> RenderLoop<G> where G: Game {
-    pub fn new(renderer: RendererSetup, mut render_pass: RenderPassInfo<G::RenderPass>, mut game: G, mut scene: <G::RenderPass as RenderPass>::Scene, input_system: InputSystem) -> RenderLoop<G> {
+    pub fn new(renderer: RendererSetup, mut render_pass: G::RenderPass, mut game: G, mut scene: <G::RenderPass as RenderPass>::Scene, input_system: InputSystem) -> RenderLoop<G> {
         let (mut renderer, images, setup_future) = (renderer.0, renderer.1, renderer.2);
-        let framebuffers = renderer.window_size_dependent_setup(&images, render_pass.raw_info());
+        let framebuffers = renderer.window_size_dependent_setup(&images, render_pass.pass_info());
         renderer.framebuffers = framebuffers;
         let dimensions = renderer.surface_dimensions();
         render_pass.set_dimensions(dimensions);
@@ -325,7 +325,7 @@ impl<G> GameLoop for RenderLoop<G> where G: Game + 'static {
         self.previous_frame_end.as_mut().unwrap().cleanup_finished();
 
         if self.recreate_swapchain {
-            self.renderer.recreate_swapchain(self.render_pass.raw_info());
+            self.renderer.recreate_swapchain(self.render_pass.pass_info());
             let dimensions = self.renderer.surface_dimensions();
             self.render_pass.set_dimensions(dimensions);
             self.game.resize(&mut self.scene, dimensions);

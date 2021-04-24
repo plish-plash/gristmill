@@ -1,2 +1,2 @@
 pub mod text;
-pub mod textured_rect;
+pub mod texture_rect;
