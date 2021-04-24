@@ -1,4 +1,4 @@
-mod image;
+pub mod image;
 
 use std::io;
 use std::fs::File;

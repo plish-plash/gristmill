@@ -1,23 +1,17 @@
-use rusttype::{PositionedGlyph, Scale, point};
-use rusttype::gpu_cache::Cache;
+use std::sync::Arc;
 
-use vulkano::buffer::{CpuAccessibleBuffer, ImmutableBuffer, BufferUsage, BufferAccess};
+use vulkano::buffer::BufferAccess;
 use vulkano::command_buffer::{DynamicState, AutoCommandBufferBuilder, SubpassContents};
-use vulkano::descriptor::descriptor_set::{DescriptorSet, PersistentDescriptorSet};
-use vulkano::descriptor::pipeline_layout::PipelineLayoutAbstract;
-use vulkano::device::Device;
-use vulkano::format::R8Unorm;
-use vulkano::image::{AttachmentImage, ImageUsage};
-use vulkano::image::view::ImageView;
+use vulkano::descriptor::descriptor_set::DescriptorSet;
 use vulkano::pipeline::GraphicsPipeline;
-use vulkano::sampler::{Sampler, Filter, MipmapMode, SamplerAddressMode};
+use vulkano::sampler::Filter;
 use vulkano::instance::QueueFamily;
 
-use std::cell::RefCell;
-use std::sync::{Arc, Weak};
+use rusttype::{PositionedGlyph, Scale, point};
 
+use crate::asset::image::Image;
 use crate::color::{Color, encode_color};
-use crate::renderer::{PipelineArc, SubpassSetup, subpass::{self, Pipeline, RenderSubpass}};
+use crate::renderer::{PipelineArc, SubpassSetup, subpass::{self, Pipeline, RenderSubpass}, pipeline::{text, textured_rect}};
 use crate::gui::{Gui, font::{Font, fonts}};
 use crate::geometry2d::{Rect, Size};
 
@@ -28,10 +22,21 @@ struct Vertex {
 }
 vulkano::impl_vertex!(Vertex, position, tex_position);
 
-impl Vertex {
+impl textured_rect::Vertex for Vertex {
+    fn new(x: f32, y: f32) -> Vertex {
+        Vertex {
+            position: [x, y],
+            tex_position: [x, y],
+        }
+    }
+}
+
+impl text::Vertex for Vertex {
     fn new(position: [i32; 2], tex_position: [f32; 2]) -> Vertex {
-        let position = [position[0] as f32, position[1] as f32];
-        Vertex { position, tex_position }
+        Vertex {
+            position: [position[0] as f32, position[1] as f32],
+            tex_position,
+        }
     }
 }
 
@@ -76,10 +81,7 @@ mod fs {
             layout(set = 0, binding = 0) uniform sampler2D tex;
 
             void main() {
-                f_color = v_color;
-                if (v_tex_position.x >= 0) {
-                    f_color *= texture(tex, v_tex_position)[0];
-                }
+                f_color = v_color * texture(tex, v_tex_position)[0];
             }
         "
     }
@@ -87,9 +89,10 @@ mod fs {
 
 pub struct GuiPipeline {
     pipeline: PipelineArc,
-    descriptor_set: Arc<dyn DescriptorSet + Send + Sync>,
-    square_vertex_buffer: Arc<ImmutableBuffer<[Vertex]>>,
-    text_cache_image: Arc<AttachmentImage<R8Unorm>>,
+    textured_rect: textured_rect::PipelineData<Vertex>,
+    text: text::PipelineData<Vertex>,
+
+    white_1x1: textured_rect::Texture,
 }
 
 impl GuiPipeline {
@@ -110,53 +113,12 @@ impl GuiPipeline {
                 .unwrap()
         );
 
-        let (square_vertex_buffer, setup_future) = ImmutableBuffer::from_iter(
-            vec![
-                Vertex::new([0, 1], [-1., -1.]),
-                Vertex::new([0, 0], [-1., -1.]),
-                Vertex::new([1, 0], [-1., -1.]),
+        let mut textured_rect = textured_rect::PipelineData::new(pipeline.clone(), subpass_setup);
+        let white_1x1 = textured_rect.upload_texture(subpass_setup, &Image::new_1x1_white(), Filter::Nearest);
 
-                Vertex::new([1, 0], [-1., -1.]),
-                Vertex::new([1, 1], [-1., -1.]),
-                Vertex::new([0, 1], [-1., -1.]),
-            ].into_iter(),
-            BufferUsage::vertex_buffer(),
-            subpass_setup.queue(),
-        ).unwrap();
-        subpass_setup.queue_join(setup_future);
+        let text = text::PipelineData::new(pipeline.clone(), subpass_setup);
 
-        // Note: because this is an AttachmentImage, the color_attachment usage is added implicitly, which is unneeded.
-        // However, Vulkano doesn't provide a "DeviceLocalImage", so this is what we've got.
-        let text_cache_image = AttachmentImage::with_usage(
-            subpass_setup.device(),
-            [TEXT_CACHE_WIDTH as u32, TEXT_CACHE_HEIGHT as u32],
-            R8Unorm,
-            ImageUsage {
-                sampled: true,
-                transfer_destination: true,
-                .. ImageUsage::none()
-            },
-        ).unwrap();
-        let text_cache_image_view = ImageView::new(text_cache_image.clone()).unwrap();
-
-        let sampler = Sampler::new(
-            subpass_setup.device(),
-            Filter::Linear,
-            Filter::Linear,
-            MipmapMode::Nearest,
-            SamplerAddressMode::Repeat,
-            SamplerAddressMode::Repeat,
-            SamplerAddressMode::Repeat,
-            0.0, 1.0, 0.0, 0.0
-        ).unwrap();
-
-        let descriptor_set = Arc::new(
-            PersistentDescriptorSet::start(pipeline.descriptor_set_layout(0).unwrap().clone())
-                .add_sampled_image(text_cache_image_view, sampler).unwrap()
-                .build().unwrap()
-        );
-
-        GuiPipeline { pipeline, descriptor_set, square_vertex_buffer, text_cache_image }
+        GuiPipeline { pipeline, textured_rect, text, white_1x1 }
     }
 }
 
@@ -164,27 +126,26 @@ impl Pipeline for GuiPipeline {
     fn raw_pipeline(&self) -> PipelineArc { self.pipeline.clone() }
 }
 
-const TEXT_CACHE_WIDTH: usize = 1000;
-const TEXT_CACHE_HEIGHT: usize = 1000;
-
 enum DrawVertexBuffer {
-    Raw(Arc<ImmutableBuffer<[Vertex]>>),
-    Text(Arc<TextDrawable>),
+    Square,
+    Text(Arc<text::Handle>),
 }
 
 pub struct DrawCommand {
     vertex_buffer: DrawVertexBuffer,
+    descriptor_set: Arc<dyn DescriptorSet + Send + Sync>,
     position: [f32; 2],
     size: [f32; 2],
     color: [f32; 4],
 }
 
-// TODO instead of one draw call per DrawCommand, build an instance buffer
+// Note: it would be nice to build an instance buffer instead of drawing one-at-a-time with push constants.
+// tricky part is descriptor_sets, since those do need separate draw commands, and draw order is important.
 impl DrawCommand {
     fn add_to_builder(self, pipeline: &GuiPipeline, builder: &mut AutoCommandBufferBuilder, dynamic_state: &DynamicState, screen_dimensions: [f32; 2]) {
         let vertex_buffer: Arc<dyn BufferAccess + Send + Sync> = match self.vertex_buffer {
-            DrawVertexBuffer::Raw(buffer) => buffer,
-            DrawVertexBuffer::Text(drawable) => drawable.vertex_buffer.borrow().as_ref().unwrap().clone(),
+            DrawVertexBuffer::Square => pipeline.textured_rect.square_vertex_buffer(),
+            DrawVertexBuffer::Text(handle) => pipeline.text.get_section_vertex_buffer(&handle),
         };
         let push_constants = vs::ty::PushConstants {
             screen_size: screen_dimensions,
@@ -197,45 +158,31 @@ impl DrawCommand {
             pipeline.raw_pipeline(),
             dynamic_state,
             vec![vertex_buffer],
-            pipeline.descriptor_set.clone(),
+            self.descriptor_set,
             push_constants,
             vec![],
         ).unwrap();
     }
 }
 
-pub trait Drawable {
-    fn draw(self: &Arc<Self>, context: &mut DrawContext<'_>, rect: Rect, color: Color);
+#[derive(Clone)]
+pub enum Drawable {
+    TexturedRect(textured_rect::Texture),
+    Text(Arc<text::Handle>),
 }
 
-pub struct SizedDrawable {
-    vertex_buffer: Arc<ImmutableBuffer<[Vertex]>>,
-}
-
-impl Drawable for SizedDrawable {
-    fn draw(self: &Arc<Self>, context: &mut DrawContext<'_>, rect: Rect, color: Color) {
-        context.queue_draw(DrawCommand {
-            vertex_buffer: DrawVertexBuffer::Raw(self.vertex_buffer.clone()),
-            position: rect.position.into(),
-            size: rect.size.into(),
-            color: encode_color(color),
-        });
-    }
-}
-
-pub struct TextDrawable {
-    text_glyphs: Vec<PositionedGlyph<'static>>,
+#[derive(Copy, Clone, Debug)]
+pub struct TextMetrics {
     width: f32,
     v_metrics: rusttype::VMetrics,
-    vertex_buffer: RefCell<Option<Arc<CpuAccessibleBuffer<[Vertex]>>>>,
 }
 
-impl TextDrawable {
-    fn new(text_glyphs: Vec<PositionedGlyph<'static>>) -> TextDrawable {
+impl TextMetrics {
+    fn new(text_glyphs: &Vec<PositionedGlyph<'static>>) -> TextMetrics {
         let last_glyph = text_glyphs.last().unwrap();
         let width = last_glyph.position().x + last_glyph.unpositioned().h_metrics().advance_width;
         let v_metrics = last_glyph.font().v_metrics(last_glyph.scale());
-        TextDrawable { text_glyphs, width, v_metrics, vertex_buffer: RefCell::new(None), }
+        TextMetrics { width, v_metrics }
     }
 
     pub fn width(&self) -> f32 { self.width }
@@ -243,141 +190,58 @@ impl TextDrawable {
     pub fn height(&self) -> f32 { self.v_metrics.ascent - self.v_metrics.descent }
 }
 
-impl Drawable for TextDrawable {
-    fn draw(self: &Arc<Self>, context: &mut DrawContext<'_>, rect: Rect, color: Color) {
-        context.queue_draw(DrawCommand {
-            vertex_buffer: DrawVertexBuffer::Text(self.clone()),
-            position: rect.position.into(),
-            size: [1., 1.],
-            color: encode_color(color),
-        });
-    }
-}
-
 pub struct DrawContext<'a> {
-    subpass: &'a mut GuiSubpass,
+    pipeline: &'a mut GuiPipeline,
+    pending_draw_commands: &'a mut Vec<DrawCommand>,
     text_changed: bool,
 }
 
 impl<'a> DrawContext<'a> {
-    pub fn new_color_rect_drawable(&mut self) -> Arc<SizedDrawable> {
-        self.subpass.square_drawable.clone()
+    pub fn new_color_rect_drawable(&mut self) -> Drawable {
+        Drawable::TexturedRect(self.pipeline.white_1x1.clone())
     }
-    pub fn new_text_drawable(&mut self, font: Font, size: f32, text: &str) -> Arc<TextDrawable> {
+    pub fn new_text_drawable(&mut self, font: Font, size: f32, text: &str) -> (Drawable, TextMetrics) {
         if text.is_empty() { panic!("TextDrawable requires a non-empty string"); }
         let font_asset = fonts().get(font);
         let glyphs: Vec<PositionedGlyph> = font_asset.layout(text, Scale::uniform(size), point(0., 0.)).collect();
-        let drawable = Arc::new(TextDrawable::new(glyphs));
-        self.subpass.text_drawables.push(Arc::downgrade(&drawable));
+        let metrics = TextMetrics::new(&glyphs);
+        let handle = self.pipeline.text.add_section(glyphs);
         self.text_changed = true;
-        drawable
+        (Drawable::Text(handle), metrics)
+    }
+
+    pub fn draw(&mut self, drawable: &Drawable, rect: Rect, color: Color) {
+        let (vertex_buffer, descriptor_set, size) = match drawable {
+            Drawable::TexturedRect(texture) => (DrawVertexBuffer::Square, texture.descriptor_set(), rect.size),
+            Drawable::Text(handle) => (DrawVertexBuffer::Text(handle.clone()), self.pipeline.text.descriptor_set(), Size::new(1, 1)),
+        };
+        self.pending_draw_commands.push(DrawCommand {
+            vertex_buffer,
+            descriptor_set,
+            position: rect.position.into(),
+            size: size.into(),
+            color: encode_color(color),
+        });
     }
 
     fn update_cache(&mut self, builder: &mut AutoCommandBufferBuilder) {
         if self.text_changed {
-            self.subpass.update_text_cache(builder);
+            self.pipeline.text.update_cache(builder);
             self.text_changed = false;
         }
-    }
-    fn queue_draw(&mut self, command: DrawCommand) {
-        self.subpass.pending_draw_commands.push(command);
     }
 }
 
 pub struct GuiSubpass {
-    device: Arc<Device>,
     pipeline: GuiPipeline,
     screen_dimensions: Size,
-    
-    square_drawable: Arc<SizedDrawable>,
-    text_drawables: Vec<Weak<TextDrawable>>,
-    text_cache: Cache<'static>,
-    text_cache_pixel_buffer: Vec<u8>,
-
     pending_draw_commands: Vec<DrawCommand>,
 }
 
 impl GuiSubpass {
     fn make_context<'a>(&'a mut self) -> DrawContext<'a> {
         self.pending_draw_commands.clear();
-        DrawContext { subpass: self, text_changed: false }
-    }
-
-    fn update_text_cache(&mut self, builder: &mut AutoCommandBufferBuilder) {
-        // Remove drawables that no longer exist.
-        // TODO might want to do this somewhere else also to reclaim the buffers faster.
-        self.text_drawables.retain(|drawable| drawable.strong_count() > 0);
-
-        // Add visible drawables to the cache queue.
-        for drawable in self.text_drawables.iter() {
-            for glyph in drawable.upgrade().unwrap().text_glyphs.iter() {
-                self.text_cache.queue_glyph(0, glyph.clone());
-            }
-        }
-        // Update the cache, so that all glyphs in the queue are present in the cache texture.
-        // TODO this builds the full cache image on the CPU, then reuploades the ENTIRE image whenever it changes.
-        // should just allocate on the GPU and have cache_queued directly update the corresponding region.
-        let cache = &mut self.text_cache;
-        let cache_pixel_buffer = &mut self.text_cache_pixel_buffer;
-        cache.cache_queued(
-            |rect, src_data| {
-                let width = (rect.max.x - rect.min.x) as usize;
-                let height = (rect.max.y - rect.min.y) as usize;
-                let mut dst_index = rect.min.y as usize * TEXT_CACHE_WIDTH + rect.min.x as usize;
-                let mut src_index = 0;
-
-                for _ in 0..height {
-                    let dst_slice = &mut cache_pixel_buffer[dst_index..dst_index+width];
-                    let src_slice = &src_data[src_index..src_index+width];
-                    dst_slice.copy_from_slice(src_slice);
-
-                    dst_index += TEXT_CACHE_WIDTH;
-                    src_index += width;
-                }
-            }
-        ).unwrap();
-
-        let buffer = CpuAccessibleBuffer::<[u8]>::from_iter(
-            self.device.clone(),
-            BufferUsage::transfer_source(),
-            false,
-            cache_pixel_buffer.iter().cloned()
-        ).unwrap();
-
-        builder.copy_buffer_to_image(
-            buffer.clone(),
-            self.pipeline.text_cache_image.clone(),
-        ).unwrap();
-
-        // TODO might be able to reuse some of these vertex buffers if cache_queued returns CachedBy::Adding
-        for drawable in self.text_drawables.iter_mut() {
-            let drawable = drawable.upgrade().unwrap();
-            let vertices: Vec<Vertex> = drawable.text_glyphs.iter().flat_map(|g| {
-                if let Ok(Some((uv_rect, screen_rect))) = cache.rect_for(0, g) {
-                    vec!(
-                        Vertex::new([screen_rect.min.x, screen_rect.max.y], [uv_rect.min.x, uv_rect.max.y]),
-                        Vertex::new([screen_rect.min.x, screen_rect.min.y], [uv_rect.min.x, uv_rect.min.y]),
-                        Vertex::new([screen_rect.max.x, screen_rect.min.y], [uv_rect.max.x, uv_rect.min.y]),
-
-                        Vertex::new([screen_rect.max.x, screen_rect.min.y], [uv_rect.max.x, uv_rect.min.y]),
-                        Vertex::new([screen_rect.max.x, screen_rect.max.y], [uv_rect.max.x, uv_rect.max.y]),
-                        Vertex::new([screen_rect.min.x, screen_rect.max.y], [uv_rect.min.x, uv_rect.max.y]),
-                    ).into_iter()
-                }
-                else {
-                    vec!().into_iter()
-                }
-            }).collect();
-
-            // TODO use CpuBufferPool
-            drawable.vertex_buffer.replace(
-                Some(CpuAccessibleBuffer::from_iter(
-                    self.device.clone(),
-                    BufferUsage::vertex_buffer(),
-                    false,
-                    vertices.into_iter(),
-                ).unwrap()));
-        }
+        DrawContext { pipeline: &mut self.pipeline, pending_draw_commands: &mut self.pending_draw_commands, text_changed: false }
     }
 }
 
@@ -386,21 +250,10 @@ impl RenderSubpass for GuiSubpass {
     type Scene = Gui;
     fn contents() -> SubpassContents { SubpassContents::Inline }
     fn new(subpass_setup: &mut SubpassSetup) -> Self {
-        let text_cache = Cache::builder().dimensions(TEXT_CACHE_WIDTH as u32, TEXT_CACHE_HEIGHT as u32).build();
-        let text_cache_pixel_buffer = vec!(0; TEXT_CACHE_WIDTH * TEXT_CACHE_HEIGHT);
-
         let pipeline = GuiPipeline::new(subpass_setup);
-        let square_drawable = Arc::new(SizedDrawable { vertex_buffer: pipeline.square_vertex_buffer.clone() });
         GuiSubpass {
-            device: subpass_setup.device(),
             pipeline,
             screen_dimensions: Size::zero(),
-
-            square_drawable,
-            text_drawables: Vec::new(),
-            text_cache,
-            text_cache_pixel_buffer,
-
             pending_draw_commands: Vec::new(),
         }
     }

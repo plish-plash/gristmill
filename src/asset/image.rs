@@ -9,7 +9,8 @@ use super::{Asset, SimpleAsset, AssetCategory, AssetResult, AssetError};
 
 type BufReader = io::BufReader<File>;
 
-enum ImageFormat {
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub enum ImageFormat {
     RGB24,
     RGBA32,
 }
@@ -27,10 +28,33 @@ impl ImageFormat {
     }
 }
 
-struct Image {
+impl From<ImageFormat> for vulkano::format::Format {
+    fn from(format: ImageFormat) -> Self {
+        match format {
+            ImageFormat::RGB24 => vulkano::format::Format::R8G8B8Srgb,
+            ImageFormat::RGBA32 => vulkano::format::Format::R8G8B8A8Srgb,
+        }
+    }
+}
+
+pub struct Image {
     size: Size,
-    buffer: Vec<u8>,
     format: ImageFormat,
+    buffer: Vec<u8>,
+}
+
+impl Image {
+    pub fn size(&self) -> Size { self.size }
+    pub fn format(&self) -> ImageFormat { self.format }
+    pub fn data(&self) -> &[u8] { &self.buffer }
+
+    pub fn new_1x1_white() -> Image {
+        Image {
+            size: Size { width: 1, height: 1 },
+            format: ImageFormat::RGBA32,
+            buffer: vec![255, 255, 255, 255],
+        }
+    }
 }
 
 impl SimpleAsset for Image {
@@ -44,13 +68,13 @@ impl SimpleAsset for Image {
         reader.next_frame(&mut buffer).unwrap();
         Ok(Image {
             size: Size { width: info.width, height: info.height },
-            buffer,
             format,
+            buffer,
         })
     }
 }
 
-struct NineSliceImage {
+pub struct NineSliceImage {
     image: Image,
     slice: EdgeRect,
 }

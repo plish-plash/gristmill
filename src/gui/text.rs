@@ -1,9 +1,8 @@
 use std::any::Any;
-use std::sync::Arc;
 
 use crate::color::Color;
 use crate::geometry2d::*;
-use super::{Widget, DrawContext, Drawable, TextDrawable, font::Font};
+use super::{Widget, DrawContext, Drawable, TextMetrics, font::Font};
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum Align {
@@ -29,7 +28,7 @@ pub struct Text {
     align: (Align, Align),
     text: String,
     text_changed: bool,
-    drawable: Option<Arc<TextDrawable>>,
+    drawable: Option<(Drawable, TextMetrics)>,
 }
 
 impl Text {
@@ -68,15 +67,15 @@ impl Widget for Text {
             self.drawable = Some(context.new_text_drawable(self.font, self.size, &self.text));
             self.text_changed = false;
         }
-        if let Some(drawable) = self.drawable.as_ref() {
-            let x = self.align.0.position(rect.position.x as f32, rect.size.width as f32, drawable.width());
+        if let Some((drawable, metrics)) = self.drawable.as_ref() {
+            let x = self.align.0.position(rect.position.x as f32, rect.size.width as f32, metrics.width());
             let y = match self.align.1 {
                 // Align baseline to container bottom.
                 Align::End => self.align.1.position(rect.position.y as f32, rect.size.height as f32, 0.),
                 // Align using the full height of the text.
-                _ => self.align.1.position(rect.position.y as f32, rect.size.height as f32, drawable.height()) + drawable.ascent(),
+                _ => self.align.1.position(rect.position.y as f32, rect.size.height as f32, metrics.height()) + metrics.ascent(),
             };
-            drawable.draw(context, Rect { position: Point::nearest(x, y), size: Size::zero() }, self.color);
+            context.draw(drawable, Rect { position: Point::nearest(x, y), size: Size::zero() }, self.color);
         }
     }
 }

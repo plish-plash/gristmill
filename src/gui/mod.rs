@@ -11,13 +11,13 @@ use std::cell::Cell;
 use slotmap::{new_key_type, Key, SecondaryMap};
 
 use crate::geometry2d::*;
-use crate::forest::Forest;
+use crate::util::forest::Forest;
 use crate::input::CursorAction;
 
 use layout::Layout;
 
 pub use event::*;
-pub use super::renderer::subpass::gui::{DrawContext, Drawable, SizedDrawable, TextDrawable};
+pub use super::renderer::subpass::gui::{DrawContext, Drawable, TextMetrics};
 
 new_key_type! {
     pub struct GuiNode;
