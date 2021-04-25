@@ -18,7 +18,7 @@ use crate::input::CursorAction;
 use layout::Layout;
 
 pub use event::*;
-pub use super::renderer::subpass::gui::{DrawContext, Drawable, Texture, TextMetrics};
+pub use super::renderer::subpass::gui::{DrawContext, Drawable, GuiTexture, TextMetrics};
 
 new_key_type! {
     pub struct GuiNode;

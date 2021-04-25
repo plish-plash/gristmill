@@ -6,16 +6,20 @@ use vulkano::instance::QueueFamily;
 
 use rusttype::{PositionedGlyph, Scale, point};
 
-use crate::asset::image::Image;
+use crate::asset::image::{Image, NineSliceImage};
 use crate::color::{Color, encode_color};
-use crate::renderer::{SubpassSetup, subpass::{self, RenderSubpass}, pipeline::{text::{TextHandle, TextPipeline}, texture_rect::TextureRectPipeline}};
+use crate::renderer::{SubpassSetup, subpass::{self, RenderSubpass}, pipeline::{text::{TextHandle, TextPipeline}, texture_rect::{Texture, NineSliceTexture, TextureRectPipeline}}};
 use crate::gui::{Gui, font::{Font, fonts}};
 use crate::geometry2d::{Rect, Size};
 
 type TextureRectConstants = crate::renderer::pipeline::texture_rect::PushConstants;
 type TextConstants = crate::renderer::pipeline::text::PushConstants;
 
-pub use crate::renderer::pipeline::texture_rect::{Texture, NineSliceTexture};
+#[derive(Clone)]
+pub enum GuiTexture {
+    Simple(Texture),
+    NineSlice(NineSliceTexture),
+}
 
 pub struct DrawCommand {
     drawable: Drawable,
@@ -77,11 +81,11 @@ impl<'a> DrawContext<'a> {
     pub fn new_color_rect_drawable(&mut self) -> Drawable {
         Drawable::TextureRect(self.subpass.white_1x1.clone())
     }
-    pub fn new_texture_rect_drawable(&mut self, texture: Texture) -> Drawable {
-        Drawable::TextureRect(texture)
-    }
-    pub fn new_texture_nine_slice_drawable(&mut self, texture: NineSliceTexture) -> Drawable {
-        Drawable::TextureNineSlice(texture)
+    pub fn new_texture_rect_drawable(&mut self, texture: GuiTexture) -> Drawable {
+        match texture {
+            GuiTexture::Simple(tex) => Drawable::TextureRect(tex),
+            GuiTexture::NineSlice(tex) => Drawable::TextureNineSlice(tex),
+        }
     }
     pub fn new_text_drawable(&mut self, font: Font, size: f32, text: &str) -> (Drawable, TextMetrics) {
         if text.is_empty() { panic!("TextDrawable requires a non-empty string"); }
@@ -124,12 +128,12 @@ impl GuiSubpass {
         DrawContext { subpass: self, text_changed: false }
     }
 
-    pub fn load_image(&mut self, subpass_setup: &mut SubpassSetup, image: &Image) -> Texture {
-        self.texture_rect_pipeline.load_image(subpass_setup, image, Filter::Linear)
+    pub fn load_image(&mut self, subpass_setup: &mut SubpassSetup, image: &Image) -> GuiTexture {
+        GuiTexture::Simple(self.texture_rect_pipeline.load_image(subpass_setup, image, Filter::Linear))
     }
-    // pub fn load_nine_slice_image(&mut self, subpass_setup: &mut SubpassSetup, image: &NineSliceImage) -> Texture {
-    //     self.pipeline.texture_rect.load_image(subpass_setup, image, Filter::Linear);
-    // }
+    pub fn load_nine_slice_image(&mut self, subpass_setup: &mut SubpassSetup, image: &NineSliceImage) -> GuiTexture {
+        GuiTexture::NineSlice(self.texture_rect_pipeline.load_nine_slice_image(subpass_setup, image))
+    }
 }
 
 impl RenderSubpass for GuiSubpass {

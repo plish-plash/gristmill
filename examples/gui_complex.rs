@@ -1,5 +1,5 @@
 use winit::window::Window;
-use gristmill::asset::{load_asset, image::Image};
+use gristmill::asset::{load_asset, image::NineSliceImage};
 use gristmill::game::{Game, run_game};
 use gristmill::gui::{Gui, WidgetNode, GuiInputActions, GuiActionEvent, texture_rect::TextureRect, button::ButtonBuilder, text::Text, layout::*};
 use gristmill::renderer::{RendererSetup, RendererLoader, RenderPass, pass, subpass};
@@ -50,8 +50,8 @@ impl Game for GuiGame {
     fn load(&mut self, (_, gui): &mut Scene, renderer_setup: &mut RendererSetup) -> Self::RenderPass {
         let mut render_pass = Self::RenderPass::with_clear_color(renderer_setup, Color::new(0.0, 0.8, 0.8, 1.0));
         let mut gui_subpass_setup = renderer_setup.subpass_setup(render_pass.pass_info(), 1);
-        let frame_image: Image = load_asset("images/FrameRounded").unwrap();
-        let frame_texture = render_pass.subpass1().load_image(&mut gui_subpass_setup, &frame_image);
+        let frame_image: NineSliceImage = load_asset("images/FrameRounded").unwrap();
+        let frame_texture = render_pass.subpass1().load_nine_slice_image(&mut gui_subpass_setup, &frame_image);
 
         let mut layout = Layout::with_base_size(Size { width: 128, height: 128 });
         layout.set_anchor(Side::Top, Anchor::parent(64));

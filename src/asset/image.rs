@@ -76,17 +76,25 @@ impl SimpleAsset for Image {
 
 pub struct NineSliceImage {
     image: Image,
-    slice: EdgeRect,
+    slices: EdgeRect,
+}
+
+impl NineSliceImage {
+    pub fn size(&self) -> Size { self.image.size() }
+    pub fn format(&self) -> ImageFormat { self.image.format() }
+    pub fn data(&self) -> &[u8] { self.image.data() }
+    pub fn slices(&self) -> EdgeRect { self.slices }
+    pub fn as_image(&self) -> &Image { &self.image }
 }
 
 impl Asset for NineSliceImage {
     fn category() -> AssetCategory { AssetCategory::Asset }
-    fn file_extension() -> &'static str { "9slice.ron" }
+    fn file_extension() -> &'static str { "ron" }
     fn load(mut file_path: PathBuf) -> AssetResult<Self> {
         let reader = BufReader::new(File::open(&file_path)?);
-        let slice = ron::de::from_reader(reader).map_err(|err| AssetError::new_format(err.to_string()))?;
+        let slices = ron::de::from_reader(reader).map_err(|err| AssetError::new_format(err.to_string()))?;
         file_path.set_extension(<Image as Asset>::file_extension());
         let image = <Image as Asset>::load(file_path)?;
-        Ok(NineSliceImage { image, slice })
+        Ok(NineSliceImage { image, slices })
     }
 }

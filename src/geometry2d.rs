@@ -18,12 +18,15 @@ impl Point {
     }
     pub fn origin() -> Point { Self::default() }
 
-    // pub fn offset(&mut self, other: Point) {
-    //     self.x += other.x;
-    //     self.y += other.y;
-    // }
     pub fn relative_to(self, other: Point) -> Point {
         Point { x: self.x - other.x, y: self.y - other.y }
+    }
+
+    pub fn normalize_components(self, area_size: Size) -> [f32; 2] {
+        [
+            self.x as f32 / area_size.width as f32,
+            self.y as f32 / area_size.height as f32,
+        ]
     }
 }
 
@@ -62,23 +65,6 @@ impl From<Size> for [f32; 2] {
     }
 }
 
-// impl From<Size> for stretch::geometry::Size<stretch::number::Number> {
-//     fn from(size: Size) -> stretch::geometry::Size<stretch::number::Number> {
-//         stretch::geometry::Size {
-//             width: stretch::number::Number::Defined(size.width as f32),
-//             height: stretch::number::Number::Defined(size.height as f32),
-//         }
-//     }
-// }
-// impl From<Size> for stretch::geometry::Size<stretch::style::Dimension> {
-//     fn from(size: Size) -> stretch::geometry::Size<stretch::style::Dimension> {
-//         stretch::geometry::Size {
-//             width: stretch::style::Dimension::Points(size.width as f32),
-//             height: stretch::style::Dimension::Points(size.height as f32),
-//         }
-//     }
-// }
-
 #[derive(Copy, Clone, Eq, PartialEq, Default, Debug)]
 pub struct Rect {
     pub position: Point,
@@ -107,20 +93,21 @@ impl Rect {
         self.position.x + self.size.width as i32 > point.x &&
         self.position.y + self.size.height as i32 > point.y
     }
-}
 
-// impl From<stretch::result::Layout> for Rect {
-//     fn from(layout: stretch::result::Layout) -> Rect {
-//         let x = layout.location.x as i32;
-//         let y = layout.location.y as i32;
-//         let width = layout.size.width as u32;
-//         let height = layout.size.height as u32;
-//         Rect {
-//             position: Point { x, y },
-//             size: Size { width, height },
-//         }
-//     }
-// }
+    pub fn inset(&self, insets: EdgeRect) -> Rect {
+        let width = self.size.width as i32;
+        let height = self.size.height as i32;
+        let inset_width = insets.left + insets.right;
+        let inset_height = insets.top + insets.bottom;
+        Rect {
+            position: Point { x: self.position.x + insets.left, y: self.position.y + insets.right },
+            size: Size {
+                width: if inset_width >= width { 0 } else { (width - inset_width) as u32 },
+                height: if inset_height >= height { 0 } else { (height - inset_height) as u32 },
+            }
+        }
+    }
+}
 
 #[derive(Copy, Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
 pub struct EdgeRect {
