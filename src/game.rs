@@ -7,7 +7,7 @@ use winit::{
 };
 
 use super::asset::load_asset;
-use super::renderer::{RendererSetup, RendererLoader, Renderer, RenderLoop, RenderPass};
+use super::renderer::{RenderPassInfo, RenderContext, Renderer, RenderLoop};
 use super::input::{InputSystem, InputBindings};
 use super::geometry2d::Size;
 
@@ -34,7 +34,7 @@ pub trait GameLoop: Sized + 'static {
                 } => {
                     *control_flow = ControlFlow::Exit;
                 }
-                Event::RedrawEventsCleared => {
+                Event::RedrawRequested(_) => {
                     self.render();
                 },
                 Event::MainEventsCleared => {
@@ -63,17 +63,16 @@ pub trait GameLoop: Sized + 'static {
 
 // -------------------------------------------------------------------------------------------------
 
-pub trait Game {
-    type RenderPass: RenderPass;
-    fn load(&mut self, scene: &mut <Self::RenderPass as RenderPass>::Scene, renderer_setup: &mut RendererSetup) -> Self::RenderPass;
-    fn update(&mut self, scene: &mut <Self::RenderPass as RenderPass>::Scene, window: &Window, input_system: &mut InputSystem, delta: f64) -> bool;
-    fn update_renderer(&mut self, scene: &mut <Self::RenderPass as RenderPass>::Scene, render_pass: &mut Self::RenderPass, loader: &mut RendererLoader);
-    fn resize(&mut self, scene: &mut <Self::RenderPass as RenderPass>::Scene, dimensions: Size);
+pub trait Game: Sized + 'static {
+    fn load(renderer: &mut Renderer) -> (Self, RenderPassInfo);
+    fn resize(&mut self, dimensions: Size);
+    fn update(&mut self, window: &Window, input_system: &mut InputSystem, delta: f64) -> bool;
+    fn render(&mut self, renderer: &mut Renderer, context: &mut RenderContext);
 }
 
-pub fn run_game<G>(mut game: G, mut scene: <G::RenderPass as RenderPass>::Scene) -> ! where G: Game + 'static {
+pub fn run_game<G: Game>() -> ! {
     let input_bindings = load_asset::<InputBindings>("controls").unwrap();
-    let (mut renderer_setup, event_loop) = Renderer::create_window();
-    let render_pass = game.load(&mut scene, &mut renderer_setup);
-    RenderLoop::new(renderer_setup, render_pass, game, scene, InputSystem::new(input_bindings)).start(event_loop)
+    let (mut renderer, event_loop) = Renderer::create_window();
+    let (game, render_pass) = G::load(&mut renderer);
+    RenderLoop::new(renderer, game, render_pass, InputSystem::new(input_bindings)).start(event_loop)
 }

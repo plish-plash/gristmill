@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use vulkano::buffer::{ImmutableBuffer, BufferUsage};
-use vulkano::command_buffer::{DynamicState, AutoCommandBufferBuilder};
 use vulkano::descriptor::descriptor_set::{DescriptorSet, PersistentDescriptorSet};
 use vulkano::descriptor::pipeline_layout::PipelineLayoutAbstract;
 use vulkano::format::Format;
@@ -12,7 +11,7 @@ use vulkano::sampler::{Sampler, Filter, MipmapMode, SamplerAddressMode};
 
 use crate::asset::image::{Image, NineSliceImage};
 use crate::geometry2d::*;
-use crate::renderer::{PipelineArc, SubpassSetup};
+use crate::renderer::{PipelineArc, SubpassSetup, RenderContext};
 
 mod vs {
     vulkano_shaders::shader!{
@@ -138,25 +137,21 @@ impl TextureRectPipeline {
         TextureRectPipeline { pipeline, square_vertex_buffer }
     }
 
-    pub fn draw_rect(&self, builder: &mut AutoCommandBufferBuilder, dynamic_state: &DynamicState, texture: &Texture, push_constants: PushConstants) {
-        builder.draw(
+    pub fn draw_rect(&self, context: &mut RenderContext, texture: &Texture, push_constants: PushConstants) {
+        context.draw(
             self.pipeline.clone(),
-            dynamic_state,
             vec![self.square_vertex_buffer.clone()],
             texture.descriptor_set.clone(),
-            push_constants,
-            vec![],
-        ).unwrap();
+            push_constants
+        );
     }
-    pub fn draw_nine_slice(&self, builder: &mut AutoCommandBufferBuilder, dynamic_state: &DynamicState, texture: &NineSliceTexture, push_constants: PushConstants) {
-        builder.draw(
+    pub fn draw_nine_slice(&self, context: &mut RenderContext, texture: &NineSliceTexture, push_constants: PushConstants) {
+        context.draw(
             self.pipeline.clone(),
-            dynamic_state,
             vec![texture.vertex_buffer.clone()],
             texture.texture.descriptor_set.clone(),
-            push_constants,
-            vec![],
-        ).unwrap();
+            push_constants
+        );
     }
     
     pub fn load_image(&mut self, subpass_setup: &mut SubpassSetup, image: &Image, filter: Filter) -> Texture {

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use vulkano::buffer::{CpuAccessibleBuffer, BufferUsage};
-use vulkano::command_buffer::{AutoCommandBufferBuilder, DynamicState};
+use vulkano::command_buffer::AutoCommandBufferBuilder;
 use vulkano::descriptor::descriptor_set::{DescriptorSet, PersistentDescriptorSet};
 use vulkano::descriptor::pipeline_layout::PipelineLayoutAbstract;
 use vulkano::device::DeviceOwned;
@@ -14,7 +14,7 @@ use vulkano::sampler::{Sampler, Filter, MipmapMode, SamplerAddressMode};
 use rusttype::PositionedGlyph;
 use rusttype::gpu_cache::Cache;
 
-use crate::renderer::{PipelineArc, SubpassSetup};
+use crate::renderer::{PipelineArc, SubpassSetup, RenderContext};
 use crate::util::handle::HandleOwner;
 use crate::new_handle_type;
 
@@ -157,16 +157,14 @@ impl TextPipeline {
         TextPipeline { pipeline, cache, cache_pixel_buffer, cache_image, descriptor_set, sections: HandleOwner::new() }
     }
 
-    pub fn draw(&self, builder: &mut AutoCommandBufferBuilder, dynamic_state: &DynamicState, text: &Arc<TextHandle>, push_constants: PushConstants) {
+    pub fn draw(&self, context: &mut RenderContext, text: &Arc<TextHandle>, push_constants: PushConstants) {
         let vertex_buffer = self.sections.get(text).vertex_buffer.as_ref().expect("text cache needs update").clone();
-        builder.draw(
+        context.draw(
             self.pipeline.clone(),
-            dynamic_state,
             vec![vertex_buffer],
             self.descriptor_set.clone(),
-            push_constants,
-            vec![],
-        ).unwrap();
+            push_constants
+        );
     }
 
     pub fn add_section(&mut self, text_glyphs: Vec<PositionedGlyph<'static>>) -> Arc<TextHandle> {

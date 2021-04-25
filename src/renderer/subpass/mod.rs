@@ -3,10 +3,9 @@ pub mod gui;
 
 // -------------------------------------------------------------------------------------------------
 
-use vulkano::command_buffer::{AutoCommandBufferBuilder, DynamicState, SubpassContents};
-use vulkano::instance::QueueFamily;
+use vulkano::command_buffer::SubpassContents;
 
-use super::SubpassSetup;
+use super::{SubpassSetup, RenderContext};
 use crate::geometry2d::Size;
 
 // -------------------------------------------------------------------------------------------------
@@ -31,8 +30,8 @@ pub trait RenderSubpass {
     fn contents() -> SubpassContents;
     fn new(subpass_setup: &mut SubpassSetup) -> Self;
     fn set_dimensions(&mut self, _dimensions: Size) {}
-    fn pre_render(&mut self, scene: &mut Self::Scene, builder: &mut AutoCommandBufferBuilder, queue_family: QueueFamily);
-    fn render(&mut self, scene: &Self::Scene, builder: &mut AutoCommandBufferBuilder, dynamic_state: &DynamicState);
+    fn pre_render(&mut self, context: &mut RenderContext, scene: &mut Self::Scene);
+    fn render(&mut self, context: &mut RenderContext, scene: &mut Self::Scene);
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -47,14 +46,14 @@ impl<T> RenderSubpass for Option<T> where T: RenderSubpass {
             inner.set_dimensions(dimensions);
         }
     }
-    fn pre_render(&mut self, scene: &mut Self::Scene, builder: &mut AutoCommandBufferBuilder, queue_family: QueueFamily) {
+    fn pre_render(&mut self, context: &mut RenderContext, scene: &mut Self::Scene) {
         if let Some(inner) = self.as_mut() {
-            inner.pre_render(scene.as_mut().expect("Scene must be Some if optional subpass is Some"), builder, queue_family);
+            inner.pre_render(context, scene.as_mut().expect("Scene must be Some if optional subpass is Some"));
         }
     }
-    fn render(&mut self, scene: &Self::Scene, builder: &mut AutoCommandBufferBuilder, dynamic_state: &DynamicState) {
+    fn render(&mut self, context: &mut RenderContext, scene: &mut Self::Scene) {
         if let Some(inner) = self.as_mut() {
-            inner.render(scene.as_ref().expect("Scene must be Some if optional subpass is Some"), builder, dynamic_state);
+            inner.render(context, scene.as_mut().expect("Scene must be Some if optional subpass is Some"));
         }
     }
 }

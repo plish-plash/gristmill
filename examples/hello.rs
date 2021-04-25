@@ -1,31 +1,32 @@
 use winit::window::Window;
 use gristmill::game::{Game, run_game};
-use gristmill::renderer::{RendererSetup, RendererLoader, pass, subpass};
+use gristmill::renderer::{RenderPassInfo, Renderer, RenderContext, pass::{RenderPass, GeometryPass}, subpass};
 use gristmill::geometry2d::Size;
 use gristmill::input::InputSystem;
 
 // -------------------------------------------------------------------------------------------------
 
-type Scene = ();
-
-struct HelloGame;
+struct HelloGame {
+    render_pass: GeometryPass<subpass::example::ExampleSubpass>
+}
 
 impl Game for HelloGame {
-    type RenderPass = pass::GeometryPass<subpass::example::ExampleSubpass>;
-
-    fn load(&mut self, _scene: &mut Scene, renderer_setup: &mut RendererSetup) -> Self::RenderPass {
-        Self::RenderPass::new(renderer_setup)
+    fn load(renderer: &mut Renderer) -> (Self, RenderPassInfo) {
+        let render_pass = GeometryPass::new(renderer);
+        let render_pass_info = render_pass.info();
+        (HelloGame { render_pass }, render_pass_info)
     }
-
-    fn update(&mut self, _scene: &mut Scene, _window: &Window, _input_system: &mut InputSystem, _delta: f64) -> bool {
+    fn resize(&mut self, dimensions: Size) {
+        self.render_pass.set_dimensions(dimensions);
+    }
+    fn update(&mut self, _window: &Window, _input_system: &mut InputSystem, _delta: f64) -> bool {
         true
     }
-
-    fn update_renderer(&mut self, _scene: &mut Scene, _render_pass: &mut Self::RenderPass, _loader: &mut RendererLoader) {}
-
-    fn resize(&mut self, _scene: &mut Scene, _dimensions: Size) {}
+    fn render(&mut self, _renderer: &mut Renderer, context: &mut RenderContext) {
+        self.render_pass.render(context, &mut ());
+    }
 }
 
 fn main() {
-    run_game(HelloGame, ())
+    run_game::<HelloGame>();
 }

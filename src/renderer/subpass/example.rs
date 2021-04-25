@@ -1,12 +1,10 @@
 use std::sync::Arc;
 
-use vulkano::command_buffer::{AutoCommandBufferBuilder, DynamicState, SubpassContents};
+use vulkano::command_buffer::SubpassContents;
 use vulkano::buffer::{CpuAccessibleBuffer, BufferUsage};
 use vulkano::pipeline::GraphicsPipeline;
-use vulkano::instance::QueueFamily;
 
-use crate::renderer::{PipelineArc, SubpassSetup};
-use super::{RenderSubpass, Geometry};
+use crate::renderer::{PipelineArc, SubpassSetup, RenderContext};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -89,22 +87,20 @@ impl ExamplePipeline {
 
 pub struct ExampleSubpass(ExamplePipeline);
 
-impl RenderSubpass for ExampleSubpass {
-    type SubpassCategory = Geometry;
+impl super::RenderSubpass for ExampleSubpass {
+    type SubpassCategory = super::Geometry;
     type Scene = ();
     fn contents() -> SubpassContents { SubpassContents::Inline }
     fn new(subpass_setup: &mut SubpassSetup) -> Self {
         ExampleSubpass(ExamplePipeline::new(subpass_setup))
     }
-    fn pre_render(&mut self, _scene: &mut Self::Scene, _builder: &mut AutoCommandBufferBuilder, _queue_family: QueueFamily) {}
-    fn render(&mut self, _scene: &Self::Scene, builder: &mut AutoCommandBufferBuilder, dynamic_state: &DynamicState) {
-        builder.draw(
+    fn pre_render(&mut self, _context: &mut RenderContext, _scene: &mut Self::Scene) {}
+    fn render(&mut self, context: &mut RenderContext, _scene: &mut Self::Scene) {
+        context.draw(
             self.0.pipeline.clone(),
-            dynamic_state,
             vec![self.0.vertex_buffer.clone()],
             (),
-            (),
-            vec![],
-        ).unwrap();
+            ()
+        );
     }
 }

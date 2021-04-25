@@ -1,14 +1,13 @@
 use std::sync::Arc;
 
-use vulkano::command_buffer::{DynamicState, AutoCommandBufferBuilder, SubpassContents};
+use vulkano::command_buffer::{AutoCommandBufferBuilder, SubpassContents};
 use vulkano::sampler::Filter;
-use vulkano::instance::QueueFamily;
 
 use rusttype::{PositionedGlyph, Scale, point};
 
 use crate::asset::image::{Image, NineSliceImage};
 use crate::color::{Color, encode_color};
-use crate::renderer::{SubpassSetup, subpass::{self, RenderSubpass}, pipeline::{text::{TextHandle, TextPipeline}, texture_rect::{Texture, NineSliceTexture, TextureRectPipeline}}};
+use crate::renderer::{SubpassSetup, RenderContext, pipeline::{text::{TextHandle, TextPipeline}, texture_rect::{Texture, NineSliceTexture, TextureRectPipeline}}};
 use crate::gui::{Gui, font::{Font, fonts}};
 use crate::geometry2d::{Rect, Size};
 
@@ -136,8 +135,8 @@ impl GuiSubpass {
     }
 }
 
-impl RenderSubpass for GuiSubpass {
-    type SubpassCategory = subpass::Gui;
+impl super::RenderSubpass for GuiSubpass {
+    type SubpassCategory = super::Gui;
     type Scene = Gui;
     fn contents() -> SubpassContents { SubpassContents::Inline }
     fn new(subpass_setup: &mut SubpassSetup) -> Self {
@@ -157,23 +156,23 @@ impl RenderSubpass for GuiSubpass {
         self.screen_dimensions = dimensions;
     }
 
-    fn pre_render(&mut self, scene: &mut Gui, builder: &mut AutoCommandBufferBuilder, _queue_family: QueueFamily) {
+    fn pre_render(&mut self, context: &mut RenderContext, scene: &mut Gui) {
         scene.layout_if_needed(self.screen_dimensions);
-        let mut context = self.make_context();
-        scene.draw(&mut context);
-        context.update_cache(builder);
+        let mut draw_context = self.make_context();
+        scene.draw(&mut draw_context);
+        draw_context.update_cache(context.builder);
     }
 
-    fn render(&mut self, _scene: &Gui, builder: &mut AutoCommandBufferBuilder, dynamic_state: &DynamicState) {
+    fn render(&mut self, context: &mut RenderContext, _scene: &mut Gui) {
         let screen_dimensions = self.screen_dimensions.into();
         for draw_command in self.pending_draw_commands.drain(..) {
             match &draw_command.drawable {
                 Drawable::TextureRect(texture) => 
-                    self.texture_rect_pipeline.draw_rect(builder, dynamic_state, texture, draw_command.texture_rect_constants(screen_dimensions)),
+                    self.texture_rect_pipeline.draw_rect(context, texture, draw_command.texture_rect_constants(screen_dimensions)),
                 Drawable::TextureNineSlice(texture) =>
-                    self.texture_rect_pipeline.draw_nine_slice(builder, dynamic_state, texture, draw_command.texture_rect_constants(screen_dimensions)),
+                    self.texture_rect_pipeline.draw_nine_slice(context, texture, draw_command.texture_rect_constants(screen_dimensions)),
                 Drawable::Text(handle) =>
-                    self.text_pipeline.draw(builder, dynamic_state, handle, draw_command.text_constants(screen_dimensions)),
+                    self.text_pipeline.draw(context, handle, draw_command.text_constants(screen_dimensions)),
             }
         }
     }
