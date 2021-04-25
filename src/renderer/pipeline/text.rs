@@ -1,11 +1,12 @@
 use std::sync::Arc;
 
 use vulkano::buffer::{CpuAccessibleBuffer, BufferUsage};
-use vulkano::command_buffer::AutoCommandBufferBuilder;
+use vulkano::command_buffer::{AutoCommandBufferBuilder, DynamicState};
 use vulkano::descriptor::descriptor_set::{DescriptorSet, PersistentDescriptorSet};
 use vulkano::descriptor::pipeline_layout::PipelineLayoutAbstract;
 use vulkano::device::DeviceOwned;
 use vulkano::format::R8Unorm;
+use vulkano::pipeline::GraphicsPipeline;
 use vulkano::image::{StorageImage, ImageUsage, ImageDimensions, ImageCreateFlags};
 use vulkano::image::view::ImageView;
 use vulkano::sampler::{Sampler, Filter, MipmapMode, SamplerAddressMode};
@@ -20,32 +21,108 @@ use crate::new_handle_type;
 const TEXT_CACHE_WIDTH: u32 = 1000;
 const TEXT_CACHE_HEIGHT: u32 = 1000;
 
-pub trait Vertex {
-    fn new(position: [i32; 2], tex_position: [f32; 2]) -> Self;
+mod vs {
+    vulkano_shaders::shader!{
+        ty: "vertex",
+        src: "
+            #version 450
+
+            layout(push_constant) uniform PushConstants {
+                vec2 screen_size;
+                vec2 position;
+                vec4 color;
+            } constants;
+
+            layout(location = 0) in vec2 position;
+            layout(location = 1) in vec2 tex_position;
+            layout(location = 0) out vec2 v_tex_position;
+            layout(location = 1) out vec4 v_color;
+
+            void main() {
+                vec2 normalized_position = (constants.position + position) / constants.screen_size;
+                gl_Position = vec4((normalized_position - 0.5) * 2.0, 0.0, 1.0);
+                v_tex_position = tex_position;
+                v_color = constants.color;
+            }
+        "
+    }
 }
 
-new_handle_type!(Handle);
+mod fs {
+    vulkano_shaders::shader!{
+        ty: "fragment",
+        src: "
+            #version 450
 
-struct Section<V: Vertex> {
+            layout(location = 0) in vec2 v_tex_position;
+            layout(location = 1) in vec4 v_color;
+            layout(location = 0) out vec4 f_color;
+
+            layout(set = 0, binding = 0) uniform sampler2D tex;
+
+            void main() {
+                f_color = v_color;
+                f_color.a *= texture(tex, v_tex_position)[0];
+            }
+        "
+    }
+}
+
+pub use vs::ty::PushConstants;
+
+#[derive(Default, Debug, Clone)]
+struct Vertex {
+    position: [f32; 2],
+    tex_position: [f32; 2],
+}
+vulkano::impl_vertex!(Vertex, position, tex_position);
+
+impl Vertex {
+    fn new(position: [i32; 2], tex_position: [f32; 2]) -> Vertex {
+        Vertex {
+            position: [position[0] as f32, position[1] as f32],
+            tex_position,
+        }
+    }
+}
+
+new_handle_type!(TextHandle);
+
+struct TextSection {
     text_glyphs: Vec<PositionedGlyph<'static>>,
-    vertex_buffer: Option<Arc<CpuAccessibleBuffer<[V]>>>,
+    vertex_buffer: Option<Arc<CpuAccessibleBuffer<[Vertex]>>>,
 }
 
-pub struct PipelineData<V: Vertex> {
+pub struct TextPipeline {
+    pipeline: PipelineArc,
     cache: Cache<'static>,
     cache_pixel_buffer: Vec<u8>,
     cache_image: Arc<StorageImage<R8Unorm>>,
     descriptor_set: Arc<dyn DescriptorSet + Send + Sync>,
-    sections: HandleOwner<Handle, Section<V>>,
+    sections: HandleOwner<TextHandle, TextSection>,
 }
 
-impl<V> PipelineData<V> where V: Vertex + 'static {
-    pub fn new(pipeline: PipelineArc, subpass_setup: &mut SubpassSetup) -> PipelineData<V> {
+impl TextPipeline {
+    pub fn new(subpass_setup: &mut SubpassSetup) -> TextPipeline {
+        let vs = vs::Shader::load(subpass_setup.device()).unwrap();
+        let fs = fs::Shader::load(subpass_setup.device()).unwrap();
+
+        let pipeline = Arc::new(
+            GraphicsPipeline::start()
+                .vertex_input_single_buffer::<Vertex>()
+                .vertex_shader(vs.main_entry_point(), ())
+                .triangle_list()
+                .viewports_dynamic_scissors_irrelevant(1)
+                .fragment_shader(fs.main_entry_point(), ())
+                .blend_alpha_blending()
+                .render_pass(subpass_setup.subpass())
+                .build(subpass_setup.device())
+                .unwrap()
+        );
+
         let cache = Cache::builder().dimensions(TEXT_CACHE_WIDTH, TEXT_CACHE_HEIGHT).build();
         let cache_pixel_buffer = vec!(0; (TEXT_CACHE_WIDTH * TEXT_CACHE_HEIGHT) as usize);
 
-        // TODO need to set VkComponentMapping on the image view so that the single red value is used for all rgba in the shader.
-        // Vulkano 0.22 doesn't have the API for this, but the repo version does.
         let cache_image = StorageImage::with_usage(
             subpass_setup.device(),
             ImageDimensions::Dim2d { width: TEXT_CACHE_WIDTH, height: TEXT_CACHE_HEIGHT, array_layers: 1 },
@@ -77,18 +154,23 @@ impl<V> PipelineData<V> where V: Vertex + 'static {
                 .build().unwrap()
         );
 
-        PipelineData { cache, cache_pixel_buffer, cache_image, descriptor_set, sections: HandleOwner::new() }
+        TextPipeline { pipeline, cache, cache_pixel_buffer, cache_image, descriptor_set, sections: HandleOwner::new() }
     }
 
-    pub fn descriptor_set(&self) -> Arc<dyn DescriptorSet + Send + Sync> {
-        self.descriptor_set.clone()
+    pub fn draw(&self, builder: &mut AutoCommandBufferBuilder, dynamic_state: &DynamicState, text: &Arc<TextHandle>, push_constants: PushConstants) {
+        let vertex_buffer = self.sections.get(text).vertex_buffer.as_ref().expect("text cache needs update").clone();
+        builder.draw(
+            self.pipeline.clone(),
+            dynamic_state,
+            vec![vertex_buffer],
+            self.descriptor_set.clone(),
+            push_constants,
+            vec![],
+        ).unwrap();
     }
 
-    pub fn add_section(&mut self, text_glyphs: Vec<PositionedGlyph<'static>>) -> Arc<Handle> {
-        self.sections.insert(Section { text_glyphs, vertex_buffer: None })
-    }
-    pub fn get_section_vertex_buffer(&self, handle: &Arc<Handle>) -> Arc<CpuAccessibleBuffer<[V]>> {
-        self.sections.get(handle).vertex_buffer.as_ref().unwrap().clone()
+    pub fn add_section(&mut self, text_glyphs: Vec<PositionedGlyph<'static>>) -> Arc<TextHandle> {
+        self.sections.insert(TextSection { text_glyphs, vertex_buffer: None })
     }
     pub fn update_cache(&mut self, builder: &mut AutoCommandBufferBuilder) {
         self.sections.cleanup();
@@ -136,16 +218,16 @@ impl<V> PipelineData<V> where V: Vertex + 'static {
         // TODO reuse valid vertex buffers if cache_queued returns CachedBy::Adding
         let cache = &self.cache;
         for section in self.sections.iter_mut() {
-            let vertices: Vec<V> = section.text_glyphs.iter().flat_map(|g| {
+            let vertices: Vec<Vertex> = section.text_glyphs.iter().flat_map(|g| {
                 if let Ok(Some((uv_rect, screen_rect))) = cache.rect_for(0, g) {
                     vec!(
-                        V::new([screen_rect.min.x, screen_rect.max.y], [uv_rect.min.x, uv_rect.max.y]),
-                        V::new([screen_rect.min.x, screen_rect.min.y], [uv_rect.min.x, uv_rect.min.y]),
-                        V::new([screen_rect.max.x, screen_rect.min.y], [uv_rect.max.x, uv_rect.min.y]),
+                        Vertex::new([screen_rect.min.x, screen_rect.max.y], [uv_rect.min.x, uv_rect.max.y]),
+                        Vertex::new([screen_rect.min.x, screen_rect.min.y], [uv_rect.min.x, uv_rect.min.y]),
+                        Vertex::new([screen_rect.max.x, screen_rect.min.y], [uv_rect.max.x, uv_rect.min.y]),
 
-                        V::new([screen_rect.max.x, screen_rect.min.y], [uv_rect.max.x, uv_rect.min.y]),
-                        V::new([screen_rect.max.x, screen_rect.max.y], [uv_rect.max.x, uv_rect.max.y]),
-                        V::new([screen_rect.min.x, screen_rect.max.y], [uv_rect.min.x, uv_rect.max.y]),
+                        Vertex::new([screen_rect.max.x, screen_rect.min.y], [uv_rect.max.x, uv_rect.min.y]),
+                        Vertex::new([screen_rect.max.x, screen_rect.max.y], [uv_rect.max.x, uv_rect.max.y]),
+                        Vertex::new([screen_rect.min.x, screen_rect.max.y], [uv_rect.min.x, uv_rect.max.y]),
                     ).into_iter()
                 }
                 else {

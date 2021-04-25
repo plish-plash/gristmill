@@ -6,7 +6,7 @@ use vulkano::pipeline::GraphicsPipeline;
 use vulkano::instance::QueueFamily;
 
 use crate::renderer::{PipelineArc, SubpassSetup};
-use super::{Pipeline, RenderSubpass, Geometry};
+use super::{RenderSubpass, Geometry};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -85,10 +85,6 @@ impl ExamplePipeline {
     }
 }
 
-impl Pipeline for ExamplePipeline {
-    fn raw_pipeline(&self) -> PipelineArc { self.pipeline.clone() }
-}
-
 // -------------------------------------------------------------------------------------------------
 
 pub struct ExampleSubpass(ExamplePipeline);
@@ -103,7 +99,7 @@ impl RenderSubpass for ExampleSubpass {
     fn pre_render(&mut self, _scene: &mut Self::Scene, _builder: &mut AutoCommandBufferBuilder, _queue_family: QueueFamily) {}
     fn render(&mut self, _scene: &Self::Scene, builder: &mut AutoCommandBufferBuilder, dynamic_state: &DynamicState) {
         builder.draw(
-            self.0.raw_pipeline(),
+            self.0.pipeline.clone(),
             dynamic_state,
             vec![self.0.vertex_buffer.clone()],
             (),
