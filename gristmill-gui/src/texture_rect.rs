@@ -1,7 +1,7 @@
 use std::any::Any;
 
-use crate::color::Color;
-use crate::geometry2d::Rect;
+use gristmill::color::Color;
+use gristmill::geometry2d::Rect;
 use super::{GuiNode, Widget, DrawContext, Drawable, GuiTexture, GuiEventSystem, GuiInputEvent, GuiActionEvent};
 
 pub struct TextureRect {
@@ -12,7 +12,7 @@ pub struct TextureRect {
 
 impl TextureRect {
     pub fn new(texture: GuiTexture) -> TextureRect {
-        TextureRect { color: crate::color::white(), texture, drawable: None }
+        TextureRect { color: gristmill::color::white(), texture, drawable: None }
     }
 
     pub fn texture(&self) -> &GuiTexture { &self.texture }

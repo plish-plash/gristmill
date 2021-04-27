@@ -92,9 +92,7 @@ impl<T> SimpleAsset for T where T: RonAsset {
 // Debug: expect working dir to be cargo project, so look for assets relative to that
 #[cfg(debug_assertions)]
 fn asset_base_path() -> io::Result<PathBuf> {
-    // TODO (???)
-    Ok(PathBuf::from("examples"))
-    //Ok(PathBuf::new())
+    Ok(PathBuf::new())
 }
 
 // Release: always look for assets relative to the executable

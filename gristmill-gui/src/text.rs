@@ -1,7 +1,7 @@
 use std::any::Any;
 
-use crate::color::Color;
-use crate::geometry2d::*;
+use gristmill::color::Color;
+use gristmill::geometry2d::*;
 use super::{Widget, DrawContext, Drawable, TextMetrics, font::Font};
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -36,7 +36,7 @@ impl Text {
         Text {
             font: Font::default(),
             size: 14.,
-            color: crate::color::black(),
+            color: gristmill::color::black(),
             align: (Align::Start, Align::End),
             text: String::new(),
             text_changed: false,

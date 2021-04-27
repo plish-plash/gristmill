@@ -1,7 +1,7 @@
 use std::any::Any;
 
-use crate::color::Color;
-use crate::geometry2d::Rect;
+use gristmill::color::Color;
+use gristmill::geometry2d::Rect;
 use super::{GuiNode, Widget, DrawContext, Drawable, GuiEventSystem, GuiInputEvent, GuiActionEvent};
 
 pub struct ColorRect {

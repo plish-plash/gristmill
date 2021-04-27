@@ -1,8 +1,3 @@
-pub mod example;
-pub mod gui;
-
-// -------------------------------------------------------------------------------------------------
-
 use vulkano::command_buffer::SubpassContents;
 
 use super::{SubpassSetup, RenderContext};

@@ -72,6 +72,7 @@ pub struct RenderContext<'a> {
 }
 
 impl<'a> RenderContext<'a> {
+    pub fn command_buffer_builder(&mut self) -> &mut AutoCommandBufferBuilder { &mut self.builder }
     pub fn draw<V, Gp, S, Pc>(
         &mut self,
         pipeline: Gp,

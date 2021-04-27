@@ -5,14 +5,14 @@ use vulkano::sampler::Filter;
 
 use rusttype::{PositionedGlyph, Scale, point};
 
-use crate::asset::image::{Image, NineSliceImage};
-use crate::color::{Color, encode_color};
-use crate::renderer::{SubpassSetup, RenderContext, pipeline::{text::{TextHandle, TextPipeline}, texture_rect::{Texture, NineSliceTexture, TextureRectPipeline}}};
-use crate::gui::{Gui, font::{Font, fonts}};
-use crate::geometry2d::{Rect, Size};
+use gristmill::asset::image::{Image, NineSliceImage};
+use gristmill::color::{Color, encode_color};
+use gristmill::renderer::{SubpassSetup, RenderContext, pipeline::{text::{TextHandle, TextPipeline}, texture_rect::{Texture, NineSliceTexture, TextureRectPipeline}}, subpass};
+use gristmill::geometry2d::{Rect, Size};
+use super::{Gui, font::{Font, fonts}};
 
-type TextureRectConstants = crate::renderer::pipeline::texture_rect::PushConstants;
-type TextConstants = crate::renderer::pipeline::text::PushConstants;
+type TextureRectConstants = gristmill::renderer::pipeline::texture_rect::PushConstants;
+type TextConstants = gristmill::renderer::pipeline::text::PushConstants;
 
 #[derive(Clone)]
 pub enum GuiTexture {
@@ -135,8 +135,8 @@ impl GuiSubpass {
     }
 }
 
-impl super::RenderSubpass for GuiSubpass {
-    type SubpassCategory = super::Gui;
+impl subpass::RenderSubpass for GuiSubpass {
+    type SubpassCategory = subpass::Gui;
     type Scene = Gui;
     fn contents() -> SubpassContents { SubpassContents::Inline }
     fn new(subpass_setup: &mut SubpassSetup) -> Self {
@@ -160,7 +160,7 @@ impl super::RenderSubpass for GuiSubpass {
         scene.layout_if_needed(self.screen_dimensions);
         let mut draw_context = self.make_context();
         scene.draw(&mut draw_context);
-        draw_context.update_cache(context.builder);
+        draw_context.update_cache(context.command_buffer_builder());
     }
 
     fn render(&mut self, context: &mut RenderContext, _scene: &mut Gui) {

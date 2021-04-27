@@ -2,11 +2,12 @@ use std::sync::Arc;
 
 use vulkano::command_buffer::SubpassContents;
 use vulkano::buffer::{CpuAccessibleBuffer, BufferUsage};
-use vulkano::pipeline::GraphicsPipeline;
+use vulkano::pipeline::{GraphicsPipeline, GraphicsPipelineAbstract};
 
-use crate::renderer::{PipelineArc, SubpassSetup, RenderContext};
+use gristmill::renderer::{SubpassSetup, RenderContext, subpass};
 
 // -------------------------------------------------------------------------------------------------
+// This is a pipeline and subpass that just draws a static red triangle. Useful for testing.
 
 mod vs {
     vulkano_shaders::shader! {
@@ -44,13 +45,13 @@ pub struct Vertex {
 }
 vulkano::impl_vertex!(Vertex, position);
 
-pub struct ExamplePipeline {
-    pipeline: PipelineArc,
+pub struct BasicGeoPipeline {
+    pipeline: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
     vertex_buffer: Arc<CpuAccessibleBuffer<[Vertex]>>,
 }
 
-impl ExamplePipeline {
-    pub fn new(subpass_setup: &mut SubpassSetup) -> ExamplePipeline {
+impl BasicGeoPipeline {
+    pub fn new(subpass_setup: &mut SubpassSetup) -> BasicGeoPipeline {
         let vs = vs::Shader::load(subpass_setup.device()).unwrap();
         let fs = fs::Shader::load(subpass_setup.device()).unwrap();
     
@@ -79,20 +80,20 @@ impl ExamplePipeline {
             ].iter().cloned(),
         ).unwrap();
 
-        ExamplePipeline { pipeline, vertex_buffer }
+        BasicGeoPipeline { pipeline, vertex_buffer }
     }
 }
 
 // -------------------------------------------------------------------------------------------------
 
-pub struct ExampleSubpass(ExamplePipeline);
+pub struct BasicGeoSubpass(BasicGeoPipeline);
 
-impl super::RenderSubpass for ExampleSubpass {
-    type SubpassCategory = super::Geometry;
+impl subpass::RenderSubpass for BasicGeoSubpass {
+    type SubpassCategory = subpass::Geometry;
     type Scene = ();
     fn contents() -> SubpassContents { SubpassContents::Inline }
     fn new(subpass_setup: &mut SubpassSetup) -> Self {
-        ExampleSubpass(ExamplePipeline::new(subpass_setup))
+        BasicGeoSubpass(BasicGeoPipeline::new(subpass_setup))
     }
     fn pre_render(&mut self, _context: &mut RenderContext, _scene: &mut Self::Scene) {}
     fn render(&mut self, context: &mut RenderContext, _scene: &mut Self::Scene) {

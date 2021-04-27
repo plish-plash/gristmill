@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 
-use crate::geometry2d::*;
+use gristmill::geometry2d::*;
 
 use super::LayoutContext;
 

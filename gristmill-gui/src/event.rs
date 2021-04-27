@@ -1,5 +1,5 @@
-use crate::event;
-use crate::geometry2d::Point;
+use gristmill::event;
+use gristmill::geometry2d::Point;
 use super::GuiNode;
 
 // -------------------------------------------------------------------------------------------------

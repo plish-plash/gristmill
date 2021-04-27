@@ -1,7 +1,7 @@
 use std::any::Any;
 
-use crate::color::Color;
-use crate::geometry2d::Rect;
+use gristmill::color::Color;
+use gristmill::geometry2d::Rect;
 use super::{Gui, GuiNode, WidgetNode, Layout, Widget, DrawContext, GuiEventSystem, GuiInputEvent, GuiActionEvent, color_rect::ColorRect, text::{Text, Align}};
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]

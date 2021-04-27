@@ -1,11 +1,12 @@
-use winit::window::Window;
-use gristmill::asset::{load_asset, image::NineSliceImage};
-use gristmill::game::{Game, run_game};
-use gristmill::gui::{Gui, WidgetNode, GuiInputActions, GuiActionEvent, texture_rect::TextureRect, button::ButtonBuilder, text::Text, layout::*};
-use gristmill::renderer::{RenderPassInfo, Renderer, RenderContext, pass::{RenderPass, GeometryGuiPass}, subpass};
+use gristmill::game::{Game, Window, run_game};
+use gristmill_gui::{Gui, WidgetNode, GuiInputActions, GuiActionEvent, color_rect::ColorRect, button::ButtonBuilder, text::Text, layout::*};
+use gristmill::renderer::{RenderPassInfo, Renderer, RenderContext, pass::{RenderPass, GeometryGuiPass}};
 use gristmill::color::Color;
 use gristmill::geometry2d::*;
 use gristmill::input::{InputSystem, InputActions, CursorAction, ActionState};
+
+use gristmill_examples::basic_geo_subpass::BasicGeoSubpass;
+use gristmill_gui::renderer::GuiSubpass;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -33,7 +34,7 @@ impl GuiInputActions for GuiGameInput {
 }
 
 struct GuiGame {
-    render_pass: GeometryGuiPass<subpass::example::ExampleSubpass, subpass::gui::GuiSubpass>,
+    render_pass: GeometryGuiPass<BasicGeoSubpass, GuiSubpass>,
     scene: Scene,
     input: GuiGameInput,
     text: WidgetNode<Text>,
@@ -42,18 +43,13 @@ struct GuiGame {
 
 impl Game for GuiGame {
     fn load(renderer: &mut Renderer) -> (Self, RenderPassInfo) {
-        let mut render_pass = GeometryGuiPass::<subpass::example::ExampleSubpass, subpass::gui::GuiSubpass>::with_clear_color(renderer, Color::new(0.0, 0.8, 0.8, 1.0));
-        let mut gui_subpass_setup = renderer.subpass_setup(render_pass.info(), 1);
-        let frame_image: NineSliceImage = load_asset("images/FrameRounded").unwrap();
-        let frame_texture = render_pass.subpass1().load_nine_slice_image(&mut gui_subpass_setup, &frame_image);
-
         let mut gui = Gui::new();
 
         let mut layout = Layout::with_base_size(Size { width: 128, height: 128 });
         layout.set_anchor(Side::Top, Anchor::parent(64));
         layout.set_anchor(Side::Left, Anchor::parent(32));
         layout.set_anchor(Side::Right, Anchor::parent(32));
-        let color_rect = gui.add(gui.root(), layout, TextureRect::new(frame_texture));
+        let color_rect = gui.add(gui.root(), layout, ColorRect::new(Color::new(0., 0., 1., 1.)));
         
         let mut layout = Layout::with_base_size(Size { width: 128, height: 32 });
         layout.set_anchor(Side::Top, Anchor::parent(16));
@@ -67,6 +63,7 @@ impl Game for GuiGame {
         layout.set_anchor(Side::Left, Anchor { target: AnchorTarget::PreviousSibling, target_side: AnchorTargetSide::SameSide, offset: 0 });
         let text = gui.add(color_rect.into(), layout, Text::new());
 
+        let render_pass = GeometryGuiPass::new(renderer);
         let render_pass_info = render_pass.info();
         (GuiGame {
             render_pass,
@@ -104,6 +101,6 @@ impl Game for GuiGame {
 }
 
 fn main() {
-    gristmill::gui::font::load_fonts(vec!["fonts/DejaVuSans".to_string()]); // TODO fonts should be autoloaded
+    gristmill_gui::font::load_fonts(vec!["fonts/DejaVuSans".to_string()]); // TODO fonts should be autoloaded
     run_game::<GuiGame>();
 }

@@ -1,0 +1,12 @@
+[package]
+name = "gristmill-gui"
+version = "0.1.0"
+authors = ["plash <plishhplashh@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+gristmill = { path = "../gristmill" }
+slotmap = { version = "1.0", features = ["serde"] }
+
+vulkano = "0.22"
+rusttype = { version = "0.9.2", features = ["gpu_cache"] }

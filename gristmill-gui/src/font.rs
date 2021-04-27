@@ -1,7 +1,7 @@
 use std::sync::Once;
 use std::path::{Path, PathBuf};
 
-use crate::asset::{Asset, AssetCategory, AssetResult, AssetError, load_asset};
+use gristmill::asset::{Asset, AssetCategory, AssetResult, AssetError, load_asset};
 
 // -------------------------------------------------------------------------------------------------
 

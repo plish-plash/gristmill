@@ -3,13 +3,15 @@ use std::{time::{Duration, Instant}, thread::sleep};
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
-    window::Window,
 };
 
 use super::asset::load_asset;
 use super::renderer::{RenderPassInfo, RenderContext, Renderer, RenderLoop};
 use super::input::{InputSystem, InputBindings};
 use super::geometry2d::Size;
+
+// So users don't have to depend on winit
+pub use winit::window::Window;
 
 // -------------------------------------------------------------------------------------------------
 

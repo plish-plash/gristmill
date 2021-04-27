@@ -1,13 +1,14 @@
-use winit::window::Window;
-use gristmill::game::{Game, run_game};
-use gristmill::renderer::{RenderPassInfo, Renderer, RenderContext, pass::{RenderPass, GeometryPass}, subpass};
+use gristmill::game::{Game, Window, run_game};
+use gristmill::renderer::{RenderPassInfo, Renderer, RenderContext, pass::{RenderPass, GeometryPass}};
 use gristmill::geometry2d::Size;
 use gristmill::input::InputSystem;
+
+use gristmill_examples::basic_geo_subpass::BasicGeoSubpass;
 
 // -------------------------------------------------------------------------------------------------
 
 struct HelloGame {
-    render_pass: GeometryPass<subpass::example::ExampleSubpass>
+    render_pass: GeometryPass<BasicGeoSubpass>
 }
 
 impl Game for HelloGame {

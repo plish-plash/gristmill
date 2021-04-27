@@ -5,20 +5,21 @@ pub mod font;
 pub mod layout;
 pub mod text;
 pub mod texture_rect;
+pub mod renderer;
 
 use std::any::Any;
 use std::cell::Cell;
 
 use slotmap::{new_key_type, Key, SecondaryMap};
 
-use crate::geometry2d::*;
-use crate::util::forest::Forest;
-use crate::input::CursorAction;
+use gristmill::geometry2d::*;
+use gristmill::util::forest::Forest;
+use gristmill::input::CursorAction;
 
 use layout::Layout;
 
 pub use event::*;
-pub use super::renderer::subpass::gui::{DrawContext, Drawable, GuiTexture, TextMetrics};
+pub use renderer::{DrawContext, Drawable, GuiTexture, TextMetrics};
 
 new_key_type! {
     pub struct GuiNode;
