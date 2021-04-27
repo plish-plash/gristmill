@@ -2,6 +2,8 @@ use std::io;
 use std::fs::File;
 use std::path::PathBuf;
 
+use serde::Deserialize;
+
 use crate::geometry2d::*;
 use super::{Asset, SimpleAsset, AssetCategory, AssetResult, AssetError};
 
@@ -96,5 +98,39 @@ impl Asset for NineSliceImage {
         file_path.set_extension(<Image as Asset>::file_extension());
         let image = <Image as Asset>::load(file_path)?;
         Ok(NineSliceImage { image, slices })
+    }
+}
+
+#[derive(Deserialize)]
+struct TileAtlasInfo {
+    tile_size: Size,
+    tile_offset: Point,
+    tile_gap: Point,
+}
+
+pub struct TileAtlasImage {
+    image: Image,
+    info: TileAtlasInfo,
+}
+
+impl TileAtlasImage {
+    pub fn size(&self) -> Size { self.image.size() }
+    pub fn format(&self) -> ImageFormat { self.image.format() }
+    pub fn data(&self) -> &[u8] { self.image.data() }
+    pub fn tile_size(&self) -> Size { self.info.tile_size }
+    pub fn tile_offset(&self) -> Point { self.info.tile_offset }
+    pub fn tile_gap(&self) -> Point { self.info.tile_gap }
+    pub fn as_image(&self) -> &Image { &self.image }
+}
+
+impl Asset for TileAtlasImage {
+    fn category() -> AssetCategory { AssetCategory::Asset }
+    fn file_extension() -> &'static str { "ron" }
+    fn load(mut file_path: PathBuf) -> AssetResult<Self> {
+        let reader = BufReader::new(File::open(&file_path)?);
+        let info = ron::de::from_reader(reader).map_err(|err| AssetError::new_format(err.to_string()))?;
+        file_path.set_extension(<Image as Asset>::file_extension());
+        let image = <Image as Asset>::load(file_path)?;
+        Ok(TileAtlasImage { image, info })
     }
 }

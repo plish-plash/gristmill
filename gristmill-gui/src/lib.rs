@@ -194,12 +194,12 @@ impl Gui {
         item.layout = layout;
     }
 
-    pub fn draw(&mut self, context: &mut DrawContext) {
+    fn draw(&mut self, context: &mut DrawContext) {
         let root_rect = self.forest.get(self.render_root).rect.get();
         self.widgets.draw_node(&self.forest, self.render_root, context, root_rect);
     }
 
-    pub fn layout_if_needed(&self, parent_size: Size) {
+    fn layout_if_needed(&self, parent_size: Size) {
         let root_rect = self.forest.get(self.render_root).rect.get();
         if root_rect.size != parent_size {
             self.layout(self.render_root, Rect { position: Point::origin(), size: parent_size }, None);

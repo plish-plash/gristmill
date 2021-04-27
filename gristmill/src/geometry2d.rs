@@ -1,6 +1,6 @@
 use serde::{Serialize, Deserialize};
 
-#[derive(Copy, Clone, Eq, PartialEq, Default, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
 pub struct Point {
     pub x: i32,
     pub y: i32,
@@ -18,6 +18,9 @@ impl Point {
     }
     pub fn origin() -> Point { Self::default() }
 
+    pub fn offset_from(self, other: Point) -> Point {
+        Point { x: self.x + other.x, y: self.y + other.y }
+    }
     pub fn relative_to(self, other: Point) -> Point {
         Point { x: self.x - other.x, y: self.y - other.y }
     }
@@ -36,7 +39,7 @@ impl From<Point> for [f32; 2] {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Default, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
 pub struct Size {
     pub width: u32,
     pub height: u32,
@@ -109,10 +112,25 @@ impl Rect {
     }
 }
 
+impl From<Rect> for [f32; 4] {
+    fn from(rect: Rect) -> [f32; 4] {
+        [
+            rect.position.x as f32, rect.position.y as f32,
+            rect.size.width as f32, rect.size.height as f32,
+        ]
+    }
+}
+
 #[derive(Copy, Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
 pub struct EdgeRect {
     pub left: i32,
     pub top: i32,
     pub right: i32,
     pub bottom: i32,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
+pub struct Index2D {
+    pub col: usize,
+    pub row: usize,
 }

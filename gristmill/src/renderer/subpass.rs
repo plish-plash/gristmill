@@ -34,7 +34,7 @@ pub trait RenderSubpass {
 impl<T> RenderSubpass for Option<T> where T: RenderSubpass {
     type SubpassCategory = T::SubpassCategory;
     type Scene = Option<T::Scene>;
-    fn contents() -> SubpassContents { SubpassContents::Inline }
+    fn contents() -> SubpassContents { T::contents() }
     fn new(_subpass_setup: &mut SubpassSetup) -> Self { None }
     fn set_dimensions(&mut self, dimensions: Size) {
         if let Some(inner) = self.as_mut() {
