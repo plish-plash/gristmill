@@ -2,7 +2,7 @@ use std::any::Any;
 
 use gristmill::color::Color;
 use gristmill::geometry2d::Rect;
-use super::{Gui, GuiNode, WidgetNode, Layout, Widget, DrawContext, GuiEventSystem, GuiInputEvent, GuiActionEvent, color_rect::ColorRect, text::{Text, Align}};
+use super::{Gui, GuiNode, WidgetNode, Layout, Widget, DrawContext, GuiEventSystem, GuiInputEvent, GuiActionEvent, GuiTexture, quad::Quad, text::{Text, Align}};
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum ButtonState {
@@ -23,8 +23,8 @@ impl Default for ButtonStateColors {
     fn default() -> ButtonStateColors {
         ButtonStateColors {
             normal: Color::new(0.8, 0.8, 0.8, 1.0),
-            hovered: Color::new(0.9, 0.9, 0.9, 1.0),
-            pressed: Color::new(0.7, 0.7, 0.7, 1.0),
+            hovered: Color::new(1.0, 1.0, 1.0, 1.0),
+            pressed: Color::new(0.6, 0.6, 0.6, 1.0),
             disabled: Color::new(0.8, 0.8, 0.8, 0.5),
         }
     }
@@ -42,18 +42,21 @@ impl ButtonStateColors {
 }
 
 pub struct Button {
-    color_rect: ColorRect,
+    quad: Quad,
     state: ButtonState,
     state_colors: ButtonStateColors,
 }
 
 impl Button {
     pub fn new(state_colors: ButtonStateColors) -> Button {
-        Button { color_rect: ColorRect::new(state_colors.normal), state: ButtonState::Normal, state_colors }
+        Button { quad: Quad::new_color(state_colors.normal), state: ButtonState::Normal, state_colors }
+    }
+    pub fn set_texture(&mut self, texture: GuiTexture) {
+        self.quad.set_texture(texture);
     }
     fn set_state(&mut self, new_state: ButtonState) {
         self.state = new_state;
-        self.color_rect.color = self.state_colors.get_color(new_state);
+        self.quad.color = self.state_colors.get_color(new_state);
     }
     fn transition_state(&mut self, from_state: ButtonState, to_state: ButtonState) {
         if self.state == from_state {
@@ -65,7 +68,7 @@ impl Button {
 impl Widget for Button {
     fn as_any(&mut self) -> &mut dyn Any { self }
     fn draw(&mut self, context: &mut DrawContext, rect: Rect) {
-        self.color_rect.draw(context, rect);
+        self.quad.draw(context, rect);
     }
     fn handle_input(&mut self, node: GuiNode, event_system: &mut GuiEventSystem, input: GuiInputEvent) -> bool {
         match input {
@@ -96,25 +99,47 @@ impl Widget for Button {
 }
 
 pub struct ButtonBuilder {
+    texture: Option<GuiTexture>,
     text: Option<String>,
+    icon: Option<GuiTexture>,
     state_colors: ButtonStateColors,
 }
 
 impl ButtonBuilder {
     pub fn new() -> ButtonBuilder {
-        ButtonBuilder { text: None, state_colors: ButtonStateColors::default() }
+        ButtonBuilder {
+            texture: None,
+            text: None, 
+            icon: None,
+            state_colors: ButtonStateColors::default()
+        }
+    }
+    pub fn with_texture(mut self, texture: GuiTexture) -> ButtonBuilder {
+        self.texture = Some(texture);
+        self
     }
     pub fn with_text(mut self, text: String) -> ButtonBuilder {
         self.text = Some(text);
         self
     }
+    pub fn with_icon(mut self, icon: GuiTexture) -> ButtonBuilder {
+        self.icon = Some(icon);
+        self
+    }
     pub fn build(self, gui: &mut Gui, parent: GuiNode, layout: Layout) -> WidgetNode<Button> {
-        let button = gui.add(parent, layout, Button::new(self.state_colors));
+        let mut button_widget = Button::new(self.state_colors);
+        if let Some(texture) = self.texture {
+            button_widget.set_texture(texture);
+        }
+        let button = gui.add_widget(parent, button_widget, layout);
+        if let Some(icon_texture) = self.icon {
+            gui.add_widget(button.into(), Quad::new_texture(icon_texture), Layout::fill_parent(0));
+        }
         if let Some(text_string) = self.text {
             let mut text = Text::new();
             text.set_text(text_string);
             text.set_alignment(Align::Middle, Align::Middle);
-            gui.add(button.into(), Layout::fill_parent(0), text);
+            gui.add_widget(button.into(), text, Layout::fill_parent(0));
         }
         button
     }

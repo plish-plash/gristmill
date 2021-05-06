@@ -1,5 +1,5 @@
 use gristmill::game::{Game, Window, run_game};
-use gristmill_gui::{Gui, WidgetNode, GuiInputActions, GuiActionEvent, color_rect::ColorRect, button::ButtonBuilder, text::Text, layout::*};
+use gristmill_gui::{Gui, WidgetNode, GuiInputActions, GuiActionEvent, quad::Quad, button::ButtonBuilder, text::Text, layout::*};
 use gristmill::renderer::{RenderPassInfo, Renderer, RenderContext, pass::{RenderPass, GeometryGuiPass}};
 use gristmill::color::Color;
 use gristmill::geometry2d::*;
@@ -45,23 +45,23 @@ impl Game for GuiGame {
     fn load(renderer: &mut Renderer) -> (Self, RenderPassInfo) {
         let mut gui = Gui::new();
 
-        let mut layout = Layout::with_base_size(Size { width: 128, height: 128 });
+        let mut layout = Layout::with_base_size(Size::new(128, 128));
         layout.set_anchor(Side::Top, Anchor::parent(64));
         layout.set_anchor(Side::Left, Anchor::parent(32));
         layout.set_anchor(Side::Right, Anchor::parent(32));
-        let color_rect = gui.add(gui.root(), layout, ColorRect::new(Color::new(0., 0., 1., 1.)));
+        let color_rect = gui.add_widget(gui.root(), Quad::new_color(Color::new(0., 0., 1., 1.)), layout);
         
-        let mut layout = Layout::with_base_size(Size { width: 128, height: 32 });
+        let mut layout = Layout::with_base_size(Size::new(128, 32));
         layout.set_anchor(Side::Top, Anchor::parent(16));
         layout.set_anchor(Side::Left, Anchor::parent(16));
         ButtonBuilder::new()
             .with_text("Hello".to_string())
             .build(&mut gui, color_rect.into(), layout);
         
-        let mut layout = Layout::with_base_size(Size { width: 128, height: 32 });
-        layout.set_anchor(Side::Top, Anchor { target: AnchorTarget::PreviousSibling, target_side: AnchorTargetSide::OppositeSide, offset: 0 });
-        layout.set_anchor(Side::Left, Anchor { target: AnchorTarget::PreviousSibling, target_side: AnchorTargetSide::SameSide, offset: 0 });
-        let text = gui.add(color_rect.into(), layout, Text::new());
+        let mut layout = Layout::with_base_size(Size::new(128, 32));
+        layout.set_anchor(Side::Top, Anchor::previous_sibling_opposite(16));
+        layout.set_anchor(Side::Left, Anchor::previous_sibling(0));
+        let text = gui.add_widget(color_rect.into(), Text::new(), layout);
 
         let render_pass = GeometryGuiPass::new(renderer);
         let render_pass_info = render_pass.info();

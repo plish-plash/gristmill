@@ -62,6 +62,9 @@ impl<K, I> Forest<K, I> where K: Key {
         }
         node
     }
+    pub fn get_child_count(&self, node: K) -> usize {
+        self.nodes.get(node).unwrap().children.len()
+    }
     pub fn get_children(&self, node: K) -> Vec<K> {
         self.nodes.get(node).unwrap().children.clone()
     }

@@ -20,6 +20,15 @@ pub enum GuiTexture {
     NineSlice(NineSliceTexture),
 }
 
+impl GuiTexture {
+    pub fn size(&self) -> Option<Size> {
+        match self {
+            GuiTexture::Simple(texture) => Some(texture.size()),
+            GuiTexture::NineSlice(_) => None,
+        }
+    }
+}
+
 pub struct DrawCommand {
     drawable: Drawable,
     rect: Rect,
@@ -96,7 +105,10 @@ impl<'a> DrawContext<'a> {
         (Drawable::Text(handle), metrics)
     }
 
-    pub fn draw(&mut self, drawable: &Drawable, rect: Rect, color: Color) {
+    pub fn draw(&mut self, drawable: &Drawable, mut rect: Rect, color: Color) {
+        if let Drawable::TextureNineSlice(tex) = drawable {
+            rect = rect.inset(tex.slices());
+        }
         self.subpass.pending_draw_commands.push(DrawCommand {
             drawable: drawable.clone(),
             rect,

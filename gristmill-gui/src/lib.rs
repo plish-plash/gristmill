@@ -1,10 +1,11 @@
 pub mod button;
-pub mod color_rect;
+pub mod container;
 pub mod event;
 pub mod font;
 pub mod layout;
+pub mod layout_builder;
 pub mod text;
-pub mod texture_rect;
+pub mod quad;
 pub mod renderer;
 
 use std::any::Any;
@@ -18,6 +19,7 @@ use gristmill::input::CursorAction;
 
 use layout::Layout;
 
+pub use container::Container;
 pub use event::*;
 pub use renderer::{DrawContext, Drawable, GuiTexture, TextMetrics};
 
@@ -108,6 +110,37 @@ impl GuiWidgets {
     }
 }
 
+struct GuiContainers {
+    containers: SecondaryMap<GuiNode, Box<dyn Container>>,
+}
+
+impl GuiContainers {
+    fn new() -> GuiContainers {
+        GuiContainers { containers: SecondaryMap::new() }
+    }
+    fn insert<C>(&mut self, node: GuiNode, container: C) where C: Container + 'static {
+        self.containers.insert(node, Box::new(container));
+    }
+    fn layout(&mut self, forest: &Forest<GuiNode, GuiItem>, node: GuiNode, item: &GuiItem, rect: Rect) {
+        item.rect.set(rect);
+        let mut child_index = 0;
+        let mut previous_child_rect = None;
+        for child in forest.iter_children(node) {
+            let child_item = forest.get(*child);
+            let child_layout = if let Some(container) = self.containers.get_mut(node) {
+                container.layout_child(rect, child_index, child_item.layout.base_size)
+            } else {
+                child_item.layout.clone()
+            };
+            let context = LayoutContext { parent_rect: rect, previous_sibling_rect: previous_child_rect };
+            let child_rect = child_layout.layout_self(&context);
+            self.layout(forest, *child, child_item, child_rect);
+            child_index += 1;
+            previous_child_rect = Some(child_rect);
+        }
+    }
+}
+
 pub trait GuiInputActions {
     fn primary(&self) -> &CursorAction;
 }
@@ -146,6 +179,7 @@ impl GuiInputState {
 pub struct Gui {
     forest: Forest<GuiNode, GuiItem>,
     widgets: GuiWidgets,
+    containers: GuiContainers,
     input_state: GuiInputState,
     render_root: GuiNode,
     event_system: GuiEventSystem,
@@ -159,6 +193,7 @@ impl Gui {
             forest,
             input_state: GuiInputState::new(),
             widgets: GuiWidgets::new(),
+            containers: GuiContainers::new(),
             render_root,
             event_system: GuiEventSystem::new(),
         }
@@ -166,6 +201,9 @@ impl Gui {
 
     pub fn root(&self) -> GuiNode {
         self.render_root
+    }
+    pub fn has_children(&self, node: GuiNode) -> bool {
+        self.forest.get_child_count(node) > 0
     }
     pub fn get_children(&self, node: GuiNode) -> Vec<GuiNode> {
         self.forest.get_children(node)
@@ -184,14 +222,24 @@ impl Gui {
             w.as_any().downcast_mut::<W>().unwrap()
         })
     }
-    pub fn add<W>(&mut self, parent: GuiNode, layout: Layout, widget: W) -> WidgetNode<W> where W: Widget + 'static {
-        let node = self.forest.add_child(parent, GuiItem::with_layout(layout));
+    pub fn add(&mut self, parent: GuiNode, layout: Layout) -> GuiNode {
+        self.forest.add_child(parent, GuiItem::with_layout(layout))
+    }
+    pub fn add_widget<W>(&mut self, parent: GuiNode, widget: W, layout: Layout) -> WidgetNode<W> where W: Widget + 'static {
+        let node = self.add(parent, layout);
         self.widgets.insert(node, widget);
         WidgetNode::new(node)
     }
-    pub fn set_node_layout(&mut self, node: GuiNode, layout: Layout) {
+    pub fn set_size(&mut self, node: GuiNode, size: Size) {
+        let item = self.forest.get_mut(node);
+        item.layout.base_size = size;
+    }
+    pub fn set_layout(&mut self, node: GuiNode, layout: Layout) {
         let item = self.forest.get_mut(node);
         item.layout = layout;
+    }
+    pub fn set_container<C>(&mut self, node: GuiNode, container: C) where C: Container + 'static {
+        self.containers.insert(node, container);
     }
 
     fn draw(&mut self, context: &mut DrawContext) {
@@ -199,27 +247,16 @@ impl Gui {
         self.widgets.draw_node(&self.forest, self.render_root, context, root_rect);
     }
 
-    fn layout_if_needed(&self, parent_size: Size) {
+    fn layout_if_needed(&mut self, parent_size: Size) {
         let root_rect = self.forest.get(self.render_root).rect.get();
         if root_rect.size != parent_size {
-            self.layout(self.render_root, Rect { position: Point::origin(), size: parent_size }, None);
+            self.containers.layout(
+                &self.forest,
+                self.render_root,
+                self.forest.get(self.render_root),
+                Rect::from_size(parent_size)
+            );
         }
-    }
-    fn layout(&self, node: GuiNode, parent_rect: Rect, previous_sibling_rect: Option<Rect>) -> Rect {
-        let item = self.forest.get(node);
-        let rect = if node == self.render_root {
-            parent_rect
-        } else {
-            let context = LayoutContext { parent_rect, previous_sibling_rect };
-            item.layout.layout_before_children(&context)
-        };
-        item.rect.set(rect);
-        let mut previous_child_rect = None;
-        for child in self.iter_children(node) {
-            let child_rect = self.layout(*child, rect, previous_child_rect);
-            previous_child_rect = Some(child_rect);
-        }
-        rect
     }
 
     fn fire_input(&mut self, input: GuiInputEvent) {

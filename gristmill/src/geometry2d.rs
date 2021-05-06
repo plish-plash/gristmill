@@ -76,6 +76,12 @@ pub struct Rect {
 
 impl Rect {
     pub fn zero() -> Rect { Self::default() }
+    pub fn new(position: Point, size: Size) -> Rect {
+        Rect { position, size }
+    }
+    pub fn from_size(size: Size) -> Rect {
+        Rect { position: Point::origin(), size }
+    }
 
     pub fn top_left(&self) -> Point {
         self.position

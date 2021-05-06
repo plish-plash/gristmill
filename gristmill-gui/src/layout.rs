@@ -10,7 +10,7 @@ pub enum Side {
 }
 
 impl Side {
-    fn opposite(self) -> Side {
+    pub fn opposite(self) -> Side {
         match self {
             Side::Left => Side::Right,
             Side::Right => Side::Left,
@@ -61,23 +61,54 @@ impl Default for Anchor {
 }
 
 impl Anchor {
+    pub fn none() -> Anchor { Anchor::default() }
     pub fn parent(offset: i32) -> Anchor {
         Anchor { target: AnchorTarget::Parent, target_side: AnchorTargetSide::SameSide, offset }
     }
+    pub fn parent_opposite(offset: i32) -> Anchor {
+        Anchor { target: AnchorTarget::Parent, target_side: AnchorTargetSide::OppositeSide, offset }
+    }
+    pub fn parent_center(offset: i32) -> Anchor {
+        Anchor { target: AnchorTarget::Parent, target_side: AnchorTargetSide::Center, offset }
+    }
+    pub fn previous_sibling(offset: i32) -> Anchor {
+        Anchor { target: AnchorTarget::PreviousSibling, target_side: AnchorTargetSide::SameSide, offset }
+    }
+    pub fn previous_sibling_opposite(offset: i32) -> Anchor {
+        Anchor { target: AnchorTarget::PreviousSibling, target_side: AnchorTargetSide::OppositeSide, offset }
+    }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Layout {
-    base_size: Size,
+    pub base_size: Size,
     anchors: [Anchor; 4],
 }
 
 impl Layout {
     pub fn fill_parent(inset: i32) -> Layout {
-        let anchor = Anchor { target: AnchorTarget::Parent, target_side: AnchorTargetSide::SameSide, offset: inset };
+        let anchor = Anchor::parent(inset);
         Layout {
             base_size: Size::zero(), anchors: [anchor; 4]
         }
+    }
+    pub fn center_parent(size: Size) -> Layout {
+        let anchors = [
+            Anchor::parent_center(-((size.width / 2) as i32)),
+            Anchor::none(),
+            Anchor::parent_center(-((size.height / 2) as i32)),
+            Anchor::none(),
+        ];
+        Layout { base_size: size, anchors }
+    }
+    pub fn offset_parent(rect: Rect) -> Layout {
+        let anchors = [
+            Anchor::parent(rect.position.x),
+            Anchor::none(),
+            Anchor::parent(rect.position.y),
+            Anchor::none(),
+        ];
+        Layout { base_size: rect.size, anchors }
     }
     pub fn with_base_size(base_size: Size) -> Layout {
         Layout {
@@ -109,7 +140,7 @@ impl Layout {
         Some(edge + offset)
     }
 
-    pub fn layout_before_children(&self, context: &LayoutContext) -> Rect {
+    pub fn layout_self(&self, context: &LayoutContext) -> Rect {
         let mut left_edge = self.get_edge(context, Side::Left);
         let mut right_edge = self.get_edge(context, Side::Right);
         let mut top_edge = self.get_edge(context, Side::Top);

@@ -33,13 +33,17 @@ pub struct Text {
 
 impl Text {
     pub fn new() -> Text {
+        Text::with_text(String::new())
+    }
+    pub fn with_text(text: String) -> Text {
+        let text_changed = !text.is_empty();
         Text {
             font: Font::default(),
             size: 14.,
             color: gristmill::color::black(),
-            align: (Align::Start, Align::End),
-            text: String::new(),
-            text_changed: false,
+            align: (Align::Start, Align::Start),
+            text,
+            text_changed,
             drawable: None,
         }
     }

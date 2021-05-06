@@ -1,6 +1,6 @@
-use gristmill::asset::{load_asset, image::NineSliceImage};
+use gristmill::asset::{load_asset, image::{Image, NineSliceImage}};
 use gristmill::game::{Game, Window, run_game};
-use gristmill_gui::{Gui, WidgetNode, GuiInputActions, GuiActionEvent, texture_rect::TextureRect, button::ButtonBuilder, text::Text, layout::*};
+use gristmill_gui::{*, quad::Quad, text::Text, button::ButtonBuilder, container::FlowContainer, layout::*, layout_builder::*};
 use gristmill::renderer::{RenderPassInfo, Renderer, RenderContext, pass::{RenderPass, GeometryGuiPass}};
 use gristmill::color::Color;
 use gristmill::geometry2d::*;
@@ -38,44 +38,77 @@ struct GuiGame {
     render_pass: GeometryGuiPass<BasicGeoSubpass, GuiSubpass>,
     scene: Scene,
     input: GuiGameInput,
-    text: WidgetNode<Text>,
-    times_clicked: u32,
+}
+
+const PADDING: i32 = 8;
+
+fn gui_top(gui: &mut Gui, parent: &BoxLayout, player_image: GuiTexture) {
+    let image_size = player_image.size().unwrap();
+    let container = parent.add(gui, BoxSize::Exact(image_size.height));
+
+    gui.add_widget(container, Quad::new_texture(player_image), Layout::offset_parent(Rect::from_size(image_size)));
+    let mut layout = Layout::with_base_size(Size::new(128, 20));
+    layout.set_anchor(Side::Top, Anchor::parent(0));
+    layout.set_anchor(Side::Left, Anchor::previous_sibling_opposite(PADDING));
+    layout.set_anchor(Side::Right, Anchor::parent(0));
+    let mut text = Text::new();
+    text.set_font(font::Font::default(), 20.0);
+    text.set_text("Player Name".to_string());
+    gui.add_widget(container, text, layout);
+    let mut layout = Layout::with_base_size(Size::new(128, 16));
+    layout.set_anchor(Side::Top, Anchor::previous_sibling_opposite(0));
+    layout.set_anchor(Side::Left, Anchor::previous_sibling(0));
+    layout.set_anchor(Side::Right, Anchor::parent(0));
+    gui.add_widget(container, Text::with_text("second line...".to_string()), layout);
 }
 
 impl Game for GuiGame {
     fn load(renderer: &mut Renderer) -> (Self, RenderPassInfo) {
         let mut render_pass = GeometryGuiPass::<BasicGeoSubpass, GuiSubpass>::with_clear_color(renderer, Color::new(0.0, 0.8, 0.8, 1.0));
         let mut gui_subpass_setup = renderer.subpass_setup(render_pass.info(), 1);
-        let frame_image: NineSliceImage = load_asset("images/FrameRounded").unwrap();
-        let frame_texture = render_pass.subpass1().load_nine_slice_image(&mut gui_subpass_setup, &frame_image);
+        let gui_subpass = render_pass.subpass1();
+        let frame_image: NineSliceImage = load_asset("images/FrameSquare").unwrap();
+        let frame_texture = gui_subpass.load_nine_slice_image(&mut gui_subpass_setup, &frame_image);
+        let button_image: NineSliceImage = load_asset("images/FrameRounded").unwrap();
+        let button_texture = gui_subpass.load_nine_slice_image(&mut gui_subpass_setup, &button_image);
+        let player_image: Image = load_asset("images/Portrait").unwrap();
+        let player_texture = gui_subpass.load_image(&mut gui_subpass_setup, &player_image);
+        let perk_image: Image = load_asset("images/Perk1").unwrap();
+        let perk_texture = gui_subpass.load_image(&mut gui_subpass_setup, &perk_image);
+        let add_image: Image = load_asset("images/Add").unwrap();
+        let add_texture = gui_subpass.load_image(&mut gui_subpass_setup, &add_image);
 
         let mut gui = Gui::new();
 
-        let mut layout = Layout::with_base_size(Size { width: 128, height: 128 });
-        layout.set_anchor(Side::Top, Anchor::parent(64));
-        layout.set_anchor(Side::Left, Anchor::parent(32));
-        layout.set_anchor(Side::Right, Anchor::parent(32));
-        let color_rect = gui.add(gui.root(), layout, TextureRect::new(frame_texture));
-        
-        let mut layout = Layout::with_base_size(Size { width: 128, height: 32 });
-        layout.set_anchor(Side::Top, Anchor::parent(16));
-        layout.set_anchor(Side::Left, Anchor::parent(16));
-        ButtonBuilder::new()
-            .with_text("Hello".to_string())
-            .build(&mut gui, color_rect.into(), layout);
-        
-        let mut layout = Layout::with_base_size(Size { width: 128, height: 32 });
-        layout.set_anchor(Side::Top, Anchor { target: AnchorTarget::PreviousSibling, target_side: AnchorTargetSide::OppositeSide, offset: 0 });
-        layout.set_anchor(Side::Left, Anchor { target: AnchorTarget::PreviousSibling, target_side: AnchorTargetSide::SameSide, offset: 0 });
-        let text = gui.add(color_rect.into(), layout, Text::new());
+        let layout = Layout::center_parent(Size::new(384, 256));
+        let player_frame = gui.add_widget(gui.root(), Quad::new_texture(frame_texture), layout);
+        let mut player_frame_layout = BoxLayout::new(player_frame.into(), BoxDirection::Vertical, PADDING);
+        player_frame_layout.set_pad_outside(true);
 
+        gui_top(&mut gui, &player_frame_layout, player_texture);
+
+        player_frame_layout.add_widget(&mut gui, Quad::new_color(gristmill::color::black()), BoxSize::Exact(1));
+        
+        let bottom = player_frame_layout.add(&mut gui, BoxSize::Remaining);
+        let bottom_layout = SplitLayout::new(bottom, BoxDirection::Horizontal, PADDING * 2);
+        let left_container = bottom_layout.add(&mut gui);
+        let right_container = bottom_layout.add(&mut gui);
+        bottom_layout.add_center_widget(&mut gui, Quad::new_color(gristmill::color::black()), 1);
+
+        gui.set_container(right_container, FlowContainer::new(PADDING));
+        for _i in 0..10 {
+            gui.add_widget(right_container, Quad::new_texture(perk_texture.clone()), Layout::with_base_size(perk_image.size()));
+        }
+        ButtonBuilder::new()
+            .with_texture(button_texture)
+            .with_icon(add_texture)
+            .build(&mut gui, right_container, Layout::with_base_size(add_image.size()));
+        
         let render_pass_info = render_pass.info();
         (GuiGame {
             render_pass,
             scene: ((), gui),
             input: GuiGameInput::default(),
-            text,
-            times_clicked: 0,
         }, render_pass_info)
     }
 
@@ -86,17 +119,12 @@ impl Game for GuiGame {
     fn update(&mut self, _window: &Window, input_system: &mut InputSystem, _delta: f64) -> bool {
         input_system.dispatch_queue(&mut self.input);
         let gui = &mut self.scene.1;
-        let times_clicked = &mut self.times_clicked;
-        let old_times_clicked = *times_clicked;
         gui.process_input(&self.input, move |event| {
             match event {
-                GuiActionEvent::Action(_) => *times_clicked += 1,
+                GuiActionEvent::Action(_) => (),
                 _ => (),
             }
         });
-        if self.times_clicked != old_times_clicked {
-            gui.get_mut(self.text).unwrap().set_text(format!("Button clicked {} times.", self.times_clicked));
-        }
         true
     }
 

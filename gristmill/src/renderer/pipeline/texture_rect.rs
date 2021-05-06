@@ -87,7 +87,13 @@ impl Vertex {
 #[derive(Clone)]
 pub struct NineSliceTexture {
     texture: Texture,
+    slices: EdgeRect,
     vertex_buffer: Arc<ImmutableBuffer<[Vertex]>>,
+}
+
+impl NineSliceTexture {
+    pub fn slices(&self) -> EdgeRect { self.slices }
+    pub fn as_texture(&self) -> &Texture { &self.texture }
 }
 
 pub struct TextureRectPipeline {
@@ -183,6 +189,6 @@ impl TextureRectPipeline {
             subpass_setup.queue(),
         ).unwrap();
         subpass_setup.queue_join(setup_future);
-        NineSliceTexture { texture, vertex_buffer }
+        NineSliceTexture { texture, slices, vertex_buffer }
     }
 }
