@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use gristmill::color::Color;
 use gristmill::geometry2d::Rect;
-use super::{Gui, GuiNode, WidgetNode, Layout, Widget, DrawContext, GuiEventSystem, GuiInputEvent, GuiActionEvent, GuiTexture, quad::Quad, text::{Text, Align}};
+use super::{impl_class_field_fn, Gui, GuiNode, WidgetNode, Layout, Widget, DrawContext, GuiEventSystem, GuiInputEvent, GuiActionEvent, GuiNavigationEvent, GuiTexture, quad::Quad, text::{Text, Align}};
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum ButtonState {
@@ -47,11 +47,13 @@ pub struct Button {
     quad: Quad,
     state: ButtonState,
     state_colors: ButtonStateColors,
+    hovered: bool,
+    press_event: GuiActionEvent,
 }
 
 impl Button {
-    pub fn new(state_colors: ButtonStateColors) -> Button {
-        Button { quad: Quad::new_color(state_colors.normal), state: ButtonState::Normal, state_colors }
+    pub fn new(state_colors: ButtonStateColors, press_event: GuiActionEvent) -> Button {
+        Button { quad: Quad::new_color(state_colors.normal), state: ButtonState::Normal, state_colors, hovered: false, press_event }
     }
     pub fn set_texture(&mut self, texture: GuiTexture) {
         self.quad.set_texture(texture);
@@ -65,6 +67,16 @@ impl Button {
             self.set_state(to_state);
         }
     }
+    
+    pub fn enabled(&self) -> bool { self.state != ButtonState::Disabled }
+    pub fn set_enabled(&mut self, enabled: bool) {
+        if enabled && self.state == ButtonState::Disabled {
+            self.set_state(if self.hovered { ButtonState::Hovered } else { ButtonState::Normal });
+        }
+        else if !enabled && self.state != ButtonState::Disabled {
+            self.set_state(ButtonState::Disabled);
+        }
+    }
 }
 
 impl Widget for Button {
@@ -72,9 +84,9 @@ impl Widget for Button {
     fn draw(&mut self, context: &mut DrawContext, rect: Rect) {
         self.quad.draw(context, rect);
     }
-    fn handle_input(&mut self, node: GuiNode, event_system: &mut GuiEventSystem, input: GuiInputEvent) -> bool {
+    fn handle_input(&mut self, node: GuiNode, mut event_system: GuiEventSystem, input: GuiInputEvent) -> bool {
         match input {
-            GuiInputEvent::CursorMoved(_) => event_system.fire_event(GuiActionEvent::Hover(node)),
+            GuiInputEvent::CursorMoved(_) => event_system.fire_navigation(GuiNavigationEvent::Hover(node)),
             GuiInputEvent::PrimaryButton(down) => {
                 if down {
                     self.transition_state(ButtonState::Hovered, ButtonState::Pressed);
@@ -82,7 +94,7 @@ impl Widget for Button {
                 else {
                     if self.state == ButtonState::Pressed {
                         self.set_state(ButtonState::Hovered);
-                        event_system.fire_event(GuiActionEvent::Action(String::new()));
+                        event_system.fire_action(self.press_event.clone());
                     }
                 }
             }
@@ -90,6 +102,7 @@ impl Widget for Button {
         true
     }
     fn set_hovered(&mut self, hovered: bool) {
+        self.hovered = hovered;
         if hovered {
             self.transition_state(ButtonState::Normal, ButtonState::Hovered);
         }
@@ -98,20 +111,6 @@ impl Widget for Button {
         }
     }
     fn set_focused(&mut self, _focused: bool) {}
-}
-
-macro_rules! impl_class_field_fn {
-    ($field:ident -> $field_type:ty) => {
-        fn $field(&self) -> $field_type {
-            if self.$field.is_some() {
-                self.$field.as_ref()
-            }
-            else if let Some(parent) = self.parent.as_ref() {
-                parent.$field()
-            }
-            else { None }
-        }
-    };
 }
 
 #[derive(Default)]
@@ -146,16 +145,41 @@ impl ButtonClass {
         self.icon = Some(icon);
     }
 
-    pub fn instance(&self, gui: &mut Gui, parent: GuiNode, layout: Layout, text: Option<String>) -> WidgetNode<Button> {
-        let mut button_widget = Button::new(self.state_colors().cloned().unwrap_or_default());
-        if let Some(texture) = self.texture() {
+    pub fn instance_builder(&self) -> ButtonBuilder {
+        ButtonBuilder { layout: Layout::default(), class: self, press_event: GuiActionEvent::Generic, text: None }
+    }
+}
+
+pub struct ButtonBuilder<'a> {
+    layout: Layout,
+    class: &'a ButtonClass,
+    press_event: GuiActionEvent,
+    text: Option<String>,
+}
+
+impl<'a> ButtonBuilder<'a> {
+    pub fn with_layout(mut self, layout: Layout) -> ButtonBuilder<'a> {
+        self.layout = layout;
+        self
+    }
+    pub fn with_press_event(mut self, press_event: GuiActionEvent) -> ButtonBuilder<'a> {
+        self.press_event = press_event;
+        self
+    }
+    pub fn with_text(mut self, text: String) -> ButtonBuilder<'a> {
+        self.text = Some(text);
+        self
+    }
+    pub fn build(self, gui: &mut Gui, parent: GuiNode) -> WidgetNode<Button> {
+        let mut button_widget = Button::new(self.class.state_colors().cloned().unwrap_or_default(), self.press_event);
+        if let Some(texture) = self.class.texture() {
             button_widget.set_texture(texture.clone());
         }
-        let button = gui.add_widget(parent, layout, button_widget);
-        if let Some(icon_texture) = self.icon() {
+        let button = gui.add_widget(parent, self.layout, button_widget);
+        if let Some(icon_texture) = self.class.icon() {
             gui.add_widget(button.into(), Layout::fill_parent(0), Quad::new_texture(icon_texture.clone()));
         }
-        if let Some(text_string) = text {
+        if let Some(text_string) = self.text {
             let mut text = Text::new(text_string);
             text.set_alignment(Align::Middle, Align::Middle);
             gui.add_widget(button.into(), Layout::fill_parent(0), text);

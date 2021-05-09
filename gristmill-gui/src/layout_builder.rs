@@ -45,7 +45,7 @@ impl BoxLayout {
             Side::Left => Size::new(size_dim, 0),
             _ => Size::new(0, size_dim),
         };
-        let mut layout = Layout::with_base_size(layout_size);
+        let mut layout = Layout::new_size(layout_size);
         let outside_anchor = Anchor::parent(self.padding.outside());
         if first {
             layout.set_anchor(front_side, outside_anchor);
@@ -85,7 +85,7 @@ impl SplitLayout {
 
     fn layout(&self, first: bool, center_size: Option<u32>) -> Layout {
         let (front_side, off_side) = self.direction_sides;
-        let mut layout = Layout::with_base_size(center_size.map(|dim| {
+        let mut layout = Layout::new_size(center_size.map(|dim| {
             match front_side {
                 Side::Left => Size::new(dim, 0),
                 _ => Size::new(0, dim),

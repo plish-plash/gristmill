@@ -4,6 +4,7 @@ pub mod event;
 pub mod font;
 pub mod layout;
 pub mod layout_builder;
+pub mod listener;
 pub mod text;
 pub mod quad;
 pub mod renderer;
@@ -18,10 +19,27 @@ use gristmill::util::forest::Forest;
 use gristmill::input::CursorAction;
 
 use layout::Layout;
+use event::{GuiActionEvent, GuiActionEventSystem, GuiNavigationEvent, GuiNavigationEventSystem};
 
 pub use container::Container;
-pub use event::*;
+pub use listener::GuiValue;
+pub use event::{GuiEventSystem, GuiInputEvent};
 pub use renderer::{DrawContext, Drawable, GuiTexture, TextMetrics};
+
+#[macro_export]
+macro_rules! impl_class_field_fn {
+    ($field:ident -> $field_type:ty) => {
+        fn $field(&self) -> $field_type {
+            if self.$field.is_some() {
+                self.$field.as_ref()
+            }
+            else if let Some(parent) = self.parent.as_ref() {
+                parent.$field()
+            }
+            else { None }
+        }
+    };
+}
 
 new_key_type! {
     pub struct GuiNode;
@@ -30,7 +48,7 @@ new_key_type! {
 pub trait Widget {
     fn as_any(&mut self) -> &mut dyn Any;
     fn draw(&mut self, context: &mut DrawContext, rect: Rect);
-    fn handle_input(&mut self, _node: GuiNode, _event_system: &mut GuiEventSystem, _input: GuiInputEvent) -> bool { false }
+    fn handle_input(&mut self, _node: GuiNode, _event_system: GuiEventSystem, _input: GuiInputEvent) -> bool { false }
     fn set_hovered(&mut self, _hovered: bool) {}
     fn set_focused(&mut self, _focused: bool) {}
 }
@@ -58,24 +76,26 @@ impl<W: Widget> From<WidgetNode<W>> for GuiNode {
 struct GuiItem {
     rect: Cell<Rect>,
     layout: Layout,
+    event_handler: Option<GuiNode>,
 }
 
 impl GuiItem {
     fn new() -> GuiItem {
-        GuiItem { rect: Cell::default(), layout: Layout::default() }
+        GuiItem { rect: Cell::default(), layout: Layout::default(), event_handler: None }
     }
     fn with_layout(layout: Layout) -> GuiItem {
-        GuiItem { rect: Cell::default(), layout }
+        GuiItem { rect: Cell::default(), layout, event_handler: None }
     }
 }
 
 struct GuiWidgets {
     widgets: SecondaryMap<GuiNode, Box<dyn Widget>>,
+    event_handlers: SecondaryMap<GuiNode, GuiActionEventSystem>,
 }
 
 impl GuiWidgets {
     fn new() -> GuiWidgets {
-        GuiWidgets { widgets: SecondaryMap::new() }
+        GuiWidgets { widgets: SecondaryMap::new(), event_handlers: SecondaryMap::new() }
     }
     fn insert<W>(&mut self, node: GuiNode, widget: W) where W: Widget + 'static {
         self.widgets.insert(node, Box::new(widget));
@@ -89,13 +109,16 @@ impl GuiWidgets {
             self.draw_node(forest, *child, context, child_rect);
         }
     }
-    fn handle_input(&mut self, node: GuiNode, event_system: &mut GuiEventSystem, input: GuiInputEvent) -> bool {
+    fn handle_input(&mut self, forest: &Forest<GuiNode, GuiItem>, node: GuiNode, event_system: &mut GuiNavigationEventSystem, input: GuiInputEvent) -> bool {
         if let Some(widget) = self.widgets.get_mut(node) {
-            widget.handle_input(node, event_system, input)
+            let event_handler = if let Some(handler) = forest.get(node).event_handler {
+                self.event_handlers.get_mut(handler)
+            } else { None };
+            widget.handle_input(node, GuiEventSystem::new(event_handler, event_system), input)
         }
         else { false }
     }
-    fn handle_cursor_moved(&mut self, forest: &Forest<GuiNode, GuiItem>, node: GuiNode, event_system: &mut GuiEventSystem, cursor_pos: Point) -> bool {
+    fn handle_cursor_moved(&mut self, forest: &Forest<GuiNode, GuiItem>, node: GuiNode, event_system: &mut GuiNavigationEventSystem, cursor_pos: Point) -> bool {
         for child in forest.iter_children(node) {
             if self.handle_cursor_moved(forest, *child, event_system, cursor_pos) {
                 return true;
@@ -104,7 +127,7 @@ impl GuiWidgets {
         let rect = forest.get(node).rect.get();
         if rect.contains(cursor_pos) {
             let relative_pos = cursor_pos.relative_to(rect.position);
-            self.handle_input(node, event_system, GuiInputEvent::CursorMoved(relative_pos))
+            self.handle_input(forest, node, event_system, GuiInputEvent::CursorMoved(relative_pos))
         }
         else { false }
     }
@@ -156,11 +179,10 @@ impl GuiInputState {
         let last_cursor_pos = Point::new(-1, -1);
         GuiInputState { last_cursor_pos, hovered: GuiNode::null(), focused: GuiNode::null() }
     }
-    fn handle_event(&mut self, widgets: &mut GuiWidgets, event: &GuiActionEvent) {
+    fn handle_event(&mut self, widgets: &mut GuiWidgets, event: &GuiNavigationEvent) {
         match event {
-            GuiActionEvent::Hover(node) => self.set_hovered(widgets, *node),
-            GuiActionEvent::Focus(_node) => unimplemented!(),
-            _ => (),
+            GuiNavigationEvent::Hover(node) => self.set_hovered(widgets, *node),
+            GuiNavigationEvent::Focus(_node) => unimplemented!(),
         }
     }
     fn set_hovered(&mut self, widgets: &mut GuiWidgets, node: GuiNode) {
@@ -182,7 +204,7 @@ pub struct Gui {
     containers: GuiContainers,
     input_state: GuiInputState,
     render_root: GuiNode,
-    event_system: GuiEventSystem,
+    navigation_events: GuiNavigationEventSystem,
 }
 
 impl Gui {
@@ -195,7 +217,7 @@ impl Gui {
             widgets: GuiWidgets::new(),
             containers: GuiContainers::new(),
             render_root,
-            event_system: GuiEventSystem::new(),
+            navigation_events: GuiNavigationEventSystem::new(),
         }
     }
 
@@ -222,8 +244,16 @@ impl Gui {
             w.as_any().downcast_mut::<W>().unwrap()
         })
     }
+    pub fn get_events(&mut self, node: GuiNode) -> Option<&mut GuiActionEventSystem> {
+        self.widgets.event_handlers.get_mut(node)
+    }
+
     pub fn add(&mut self, parent: GuiNode, layout: Layout) -> GuiNode {
-        self.forest.add_child(parent, GuiItem::with_layout(layout))
+        let mut item = GuiItem::with_layout(layout);
+        if let Some(event_handler) = self.forest.get(parent).event_handler {
+            item.event_handler = Some(event_handler);
+        }
+        self.forest.add_child(parent, item)
     }
     pub fn add_widget<W>(&mut self, parent: GuiNode, layout: Layout, widget: W) -> WidgetNode<W> where W: Widget + 'static {
         let node = self.add(parent, layout);
@@ -240,6 +270,10 @@ impl Gui {
     }
     pub fn set_container<C>(&mut self, node: GuiNode, container: C) where C: Container + 'static {
         self.containers.insert(node, container);
+    }
+    pub fn set_event_handler(&mut self, node: GuiNode) {
+        self.forest.get_mut(node).event_handler = Some(node);
+        self.widgets.event_handlers.insert(node, GuiActionEventSystem::new());
     }
 
     fn draw(&mut self, context: &mut DrawContext) {
@@ -262,17 +296,19 @@ impl Gui {
     fn fire_input(&mut self, input: GuiInputEvent) {
         match input {
             GuiInputEvent::CursorMoved(cursor_pos) => {
-                if !self.widgets.handle_cursor_moved(&self.forest, self.render_root, &mut self.event_system, cursor_pos) {
+                if !self.widgets.handle_cursor_moved(&self.forest, self.render_root, &mut self.navigation_events, cursor_pos) {
                     // If the cursor isn't over anything, set the hovered widget to null.
                     self.input_state.set_hovered(&mut self.widgets, GuiNode::null());
                 }
             }
-            GuiInputEvent::PrimaryButton(_) => { self.widgets.handle_input(self.input_state.hovered, &mut self.event_system, input); }
+            GuiInputEvent::PrimaryButton(_) => {
+                self.widgets.handle_input(&self.forest, self.input_state.hovered, &mut self.navigation_events, input);
+            }
         }
     }
-    pub fn process_input<A, F>(&mut self, actions: &A, mut handler: F) where A: GuiInputActions, F: FnMut(GuiActionEvent) {
+    pub fn process_input<A>(&mut self, actions: &A) where A: GuiInputActions {
         // Convert input actions to GuiInputEvent and send them to relevant widgets.
-        // Widgets respond to GuiInputEvents by sending GuiActionEvents to the event system.
+        // Widgets respond to GuiInputEvents by sending GuiActionEvents and GuiNavigationEvents to the event system.
         let primary_action = actions.primary();
         let cursor_pos = primary_action.position();
         if cursor_pos != self.input_state.last_cursor_pos {
@@ -286,12 +322,11 @@ impl Gui {
             self.fire_input(GuiInputEvent::PrimaryButton(false));
         }
 
-        // Process the resulting GuiActionEvents.
+        // Process the resulting GuiNavigationEvents.
         let widgets = &mut self.widgets;
         let input_state = &mut self.input_state;
-        self.event_system.dispatch_queue(move |event| {
+        self.navigation_events.dispatch_queue(move |event| {
             input_state.handle_event(widgets, &event);
-            handler(event);
         });
     }
 }

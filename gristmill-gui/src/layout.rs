@@ -131,7 +131,7 @@ impl Layout {
         ];
         Layout { base_size: rect.size, anchors }
     }
-    pub fn with_base_size(base_size: Size) -> Layout {
+    pub fn new_size(base_size: Size) -> Layout {
         Layout {
             base_size, anchors: Default::default()
         }
