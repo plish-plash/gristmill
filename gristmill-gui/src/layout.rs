@@ -79,6 +79,27 @@ impl Anchor {
     }
 }
 
+pub struct Padding {
+    padding: i32,
+    pad_outside: bool,
+}
+
+impl Padding {
+    pub fn new(padding: i32) -> Padding {
+        Padding { padding, pad_outside: true }
+    }
+    pub fn new_inside(padding: i32) -> Padding {
+        Padding { padding, pad_outside: false }
+    }
+    pub fn inside(&self) -> i32 {
+        self.padding
+    }
+    pub fn outside(&self) -> i32 {
+        if self.pad_outside { self.padding }
+        else { 0 }
+    }
+}
+
 #[derive(Default, Clone)]
 pub struct Layout {
     pub base_size: Size,

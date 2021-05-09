@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::sync::Arc;
 
 use gristmill::color::Color;
 use gristmill::geometry2d::Rect;
@@ -12,6 +13,7 @@ pub enum ButtonState {
     Disabled,
 }
 
+#[derive(Clone)]
 pub struct ButtonStateColors {
     pub normal: Color,
     pub hovered: Color,
@@ -98,48 +100,65 @@ impl Widget for Button {
     fn set_focused(&mut self, _focused: bool) {}
 }
 
-pub struct ButtonBuilder {
-    texture: Option<GuiTexture>,
-    text: Option<String>,
-    icon: Option<GuiTexture>,
-    state_colors: ButtonStateColors,
+macro_rules! impl_class_field_fn {
+    ($field:ident -> $field_type:ty) => {
+        fn $field(&self) -> $field_type {
+            if self.$field.is_some() {
+                self.$field.as_ref()
+            }
+            else if let Some(parent) = self.parent.as_ref() {
+                parent.$field()
+            }
+            else { None }
+        }
+    };
 }
 
-impl ButtonBuilder {
-    pub fn new() -> ButtonBuilder {
-        ButtonBuilder {
-            texture: None,
-            text: None, 
-            icon: None,
-            state_colors: ButtonStateColors::default()
+#[derive(Default)]
+pub struct ButtonClass {
+    parent: Option<Arc<ButtonClass>>,
+    texture: Option<GuiTexture>,
+    icon: Option<GuiTexture>,
+    state_colors: Option<ButtonStateColors>,
+}
+
+impl ButtonClass {
+    impl_class_field_fn!(texture -> Option<&GuiTexture>);
+    impl_class_field_fn!(icon -> Option<&GuiTexture>);
+    impl_class_field_fn!(state_colors -> Option<&ButtonStateColors>);
+}
+
+impl ButtonClass {
+    pub fn new() -> ButtonClass {
+        Default::default()
+    }
+    pub fn new_inherit(parent: Arc<ButtonClass>) -> ButtonClass {
+        ButtonClass {
+            parent: Some(parent),
+            ..Default::default()
         }
     }
-    pub fn with_texture(mut self, texture: GuiTexture) -> ButtonBuilder {
+
+    pub fn set_texture(&mut self, texture: GuiTexture) {
         self.texture = Some(texture);
-        self
     }
-    pub fn with_text(mut self, text: String) -> ButtonBuilder {
-        self.text = Some(text);
-        self
-    }
-    pub fn with_icon(mut self, icon: GuiTexture) -> ButtonBuilder {
+    pub fn set_icon(&mut self, icon: GuiTexture) {
         self.icon = Some(icon);
-        self
     }
-    pub fn build(self, gui: &mut Gui, parent: GuiNode, layout: Layout) -> WidgetNode<Button> {
-        let mut button_widget = Button::new(self.state_colors);
-        if let Some(texture) = self.texture {
-            button_widget.set_texture(texture);
+
+    pub fn instance(&self, gui: &mut Gui, parent: GuiNode, layout: Layout, text: Option<String>) -> WidgetNode<Button> {
+        let mut button_widget = Button::new(self.state_colors().cloned().unwrap_or_default());
+        if let Some(texture) = self.texture() {
+            button_widget.set_texture(texture.clone());
         }
-        let button = gui.add_widget(parent, button_widget, layout);
-        if let Some(icon_texture) = self.icon {
-            gui.add_widget(button.into(), Quad::new_texture(icon_texture), Layout::fill_parent(0));
+        let button = gui.add_widget(parent, layout, button_widget);
+        if let Some(icon_texture) = self.icon() {
+            gui.add_widget(button.into(), Layout::fill_parent(0), Quad::new_texture(icon_texture.clone()));
         }
-        if let Some(text_string) = self.text {
-            let mut text = Text::new();
-            text.set_text(text_string);
+        if let Some(text_string) = text {
+            let mut text = Text::new(text_string);
             text.set_alignment(Align::Middle, Align::Middle);
-            gui.add_widget(button.into(), text, Layout::fill_parent(0));
+            gui.add_widget(button.into(), Layout::fill_parent(0), text);
         }
         button
     }

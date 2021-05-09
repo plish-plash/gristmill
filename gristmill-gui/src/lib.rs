@@ -225,7 +225,7 @@ impl Gui {
     pub fn add(&mut self, parent: GuiNode, layout: Layout) -> GuiNode {
         self.forest.add_child(parent, GuiItem::with_layout(layout))
     }
-    pub fn add_widget<W>(&mut self, parent: GuiNode, widget: W, layout: Layout) -> WidgetNode<W> where W: Widget + 'static {
+    pub fn add_widget<W>(&mut self, parent: GuiNode, layout: Layout, widget: W) -> WidgetNode<W> where W: Widget + 'static {
         let node = self.add(parent, layout);
         self.widgets.insert(node, widget);
         WidgetNode::new(node)

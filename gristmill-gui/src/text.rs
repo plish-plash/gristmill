@@ -32,10 +32,7 @@ pub struct Text {
 }
 
 impl Text {
-    pub fn new() -> Text {
-        Text::with_text(String::new())
-    }
-    pub fn with_text(text: String) -> Text {
+    pub fn new(text: String) -> Text {
         let text_changed = !text.is_empty();
         Text {
             font: Font::default(),
@@ -46,6 +43,9 @@ impl Text {
             text_changed,
             drawable: None,
         }
+    }
+    pub fn new_empty() -> Text {
+        Text::new(String::new())
     }
     pub fn set_font(&mut self, font: Font, size: f32) {
         self.font = font;

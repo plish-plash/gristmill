@@ -1,6 +1,8 @@
+use std::sync::Arc;
+
 use gristmill::asset::{load_asset, image::{Image, NineSliceImage}};
 use gristmill::game::{Game, Window, run_game};
-use gristmill_gui::{*, quad::Quad, text::Text, button::ButtonBuilder, container::FlowContainer, layout::*, layout_builder::*};
+use gristmill_gui::{*, quad::Quad, text::{Text, Align}, button::ButtonClass, container::*, layout::*, layout_builder::*};
 use gristmill::renderer::{RenderPassInfo, Renderer, RenderContext, pass::{RenderPass, GeometryGuiPass}};
 use gristmill::color::Color;
 use gristmill::geometry2d::*;
@@ -46,20 +48,36 @@ fn gui_top(gui: &mut Gui, parent: &BoxLayout, player_image: GuiTexture) {
     let image_size = player_image.size().unwrap();
     let container = parent.add(gui, BoxSize::Exact(image_size.height));
 
-    gui.add_widget(container, Quad::new_texture(player_image), Layout::offset_parent(Rect::from_size(image_size)));
+    gui.add_widget(container, Layout::offset_parent(Rect::from_size(image_size)), Quad::new_texture(player_image));
     let mut layout = Layout::with_base_size(Size::new(128, 20));
     layout.set_anchor(Side::Top, Anchor::parent(0));
     layout.set_anchor(Side::Left, Anchor::previous_sibling_opposite(PADDING));
     layout.set_anchor(Side::Right, Anchor::parent(0));
-    let mut text = Text::new();
+    let mut text = Text::new("Player Name".to_string());
     text.set_font(font::Font::default(), 20.0);
-    text.set_text("Player Name".to_string());
-    gui.add_widget(container, text, layout);
+    gui.add_widget(container, layout, text);
     let mut layout = Layout::with_base_size(Size::new(128, 16));
     layout.set_anchor(Side::Top, Anchor::previous_sibling_opposite(0));
     layout.set_anchor(Side::Left, Anchor::previous_sibling(0));
     layout.set_anchor(Side::Right, Anchor::parent(0));
-    gui.add_widget(container, Text::with_text("second line...".to_string()), layout);
+    gui.add_widget(container, layout, Text::new("second line...".to_string()));
+}
+
+fn gui_stat_row(gui: &mut Gui, container: GuiNode, stat: String, buttons: Option<(&ButtonClass, &ButtonClass)>) {
+    let mut text = Text::new(stat);
+    text.set_alignment(Align::Start, Align::Middle);
+    gui.add_widget(container, Layout::default(), text);
+    let mut text = Text::new("0".to_string());
+    text.set_alignment(Align::Middle, Align::Middle);
+    gui.add_widget(container, Layout::default(), text);
+    if let Some((add_button, sub_button)) = buttons {
+        add_button.instance(gui, container, Layout::default(), None);
+        sub_button.instance(gui, container, Layout::default(), None);
+    }
+    else {
+        gui.add(container, Layout::default());
+        gui.add(container, Layout::default());
+    }
 }
 
 impl Game for GuiGame {
@@ -77,32 +95,43 @@ impl Game for GuiGame {
         let perk_texture = gui_subpass.load_image(&mut gui_subpass_setup, &perk_image);
         let add_image: Image = load_asset("images/Add").unwrap();
         let add_texture = gui_subpass.load_image(&mut gui_subpass_setup, &add_image);
+        let sub_image: Image = load_asset("images/Subtract").unwrap();
+        let sub_texture = gui_subpass.load_image(&mut gui_subpass_setup, &sub_image);
 
         let mut gui = Gui::new();
+        let mut base_button = ButtonClass::new();
+        base_button.set_texture(button_texture);
+        let base_button = Arc::new(base_button);
 
         let layout = Layout::center_parent(Size::new(384, 256));
-        let player_frame = gui.add_widget(gui.root(), Quad::new_texture(frame_texture), layout);
-        let mut player_frame_layout = BoxLayout::new(player_frame.into(), BoxDirection::Vertical, PADDING);
-        player_frame_layout.set_pad_outside(true);
+        let player_frame = gui.add_widget(gui.root(), layout, Quad::new_texture(frame_texture));
+        let player_frame_layout = BoxLayout::new(player_frame.into(), BoxDirection::Vertical, Padding::new(PADDING));
 
         gui_top(&mut gui, &player_frame_layout, player_texture);
 
-        player_frame_layout.add_widget(&mut gui, Quad::new_color(gristmill::color::black()), BoxSize::Exact(1));
+        player_frame_layout.add_widget(&mut gui, BoxSize::Exact(1), Quad::new_color(gristmill::color::black()));
         
         let bottom = player_frame_layout.add(&mut gui, BoxSize::Remaining);
-        let bottom_layout = SplitLayout::new(bottom, BoxDirection::Horizontal, PADDING * 2);
+        let bottom_layout = SplitLayout::new(bottom, BoxDirection::Horizontal, Padding::new_inside(PADDING * 2));
         let left_container = bottom_layout.add(&mut gui);
         let right_container = bottom_layout.add(&mut gui);
-        bottom_layout.add_center_widget(&mut gui, Quad::new_color(gristmill::color::black()), 1);
+        bottom_layout.add_center_widget(&mut gui, 1, Quad::new_color(gristmill::color::black()));
+        
+        gui.set_container(left_container, TableContainer::new(&[0, 24, 16, 16], 16, Padding::new_inside(PADDING), Some(1)));
+        let mut add_button = ButtonClass::new_inherit(base_button.clone());
+        add_button.set_icon(add_texture.clone());
+        let mut sub_button = ButtonClass::new_inherit(base_button.clone());
+        sub_button.set_icon(sub_texture.clone());
+        gui_stat_row(&mut gui, left_container, "Remaining".to_string(), None);
+        gui_stat_row(&mut gui, left_container, "Strength".to_string(), Some((&add_button, &sub_button)));
+        gui_stat_row(&mut gui, left_container, "Dexterity".to_string(), Some((&add_button, &sub_button)));
+        gui_stat_row(&mut gui, left_container, "Intelligence".to_string(), Some((&add_button, &sub_button)));
 
-        gui.set_container(right_container, FlowContainer::new(PADDING));
+        gui.set_container(right_container, FlowContainer::new(Padding::new_inside(PADDING)));
         for _i in 0..10 {
-            gui.add_widget(right_container, Quad::new_texture(perk_texture.clone()), Layout::with_base_size(perk_image.size()));
+            gui.add_widget(right_container, Layout::with_base_size(perk_image.size()), Quad::new_texture(perk_texture.clone()));
         }
-        ButtonBuilder::new()
-            .with_texture(button_texture)
-            .with_icon(add_texture)
-            .build(&mut gui, right_container, Layout::with_base_size(add_image.size()));
+        add_button.instance(&mut gui, right_container, Layout::with_base_size(add_image.size()), None);
         
         let render_pass_info = render_pass.info();
         (GuiGame {
