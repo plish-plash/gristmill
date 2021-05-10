@@ -9,22 +9,23 @@ use vulkano::sampler::{Sampler, Filter, MipmapMode, SamplerAddressMode};
 
 use crate::asset::image::Image;
 use crate::geometry2d::*;
-use crate::renderer::{PipelineArc, SubpassSetup};
+use crate::renderer::{PipelineArc, LoadContext};
 
 #[derive(Clone)]
 pub struct Texture {
-    pub(crate) descriptor_set: Arc<dyn DescriptorSet + Send + Sync>,
+    descriptor_set: Arc<dyn DescriptorSet + Send + Sync>,
     size: Size,
 }
 
 impl Texture {
     pub fn size(&self) -> Size { self.size }
+    pub fn descriptor_set(&self) -> Arc<dyn DescriptorSet + Send + Sync> { self.descriptor_set.clone() }
 }
 
-pub struct TexturePipeline;
+pub struct TextureLoader;
 
-impl TexturePipeline {
-    pub fn load_image(pipeline: &PipelineArc, subpass_setup: &mut SubpassSetup, image: &Image, filter: Filter) -> Texture {
+impl TextureLoader {
+    pub fn load_image(pipeline: &PipelineArc, context: &mut LoadContext, image: &Image, filter: Filter) -> Texture {
         let image_size = image.size();
         let dimensions = ImageDimensions::Dim2d {
             width: image_size.width,
@@ -36,13 +37,13 @@ impl TexturePipeline {
             dimensions,
             MipmapsCount::One,
             image.format().into(),
-            subpass_setup.queue(),
+            context.queue(),
         ).unwrap();
         let image_view = ImageView::new(image.clone()).unwrap();
-        subpass_setup.queue_join(setup_future);
+        context.load_future(setup_future);
 
         let sampler = Sampler::new(
-            subpass_setup.device(),
+            context.device(),
             filter,
             filter,
             MipmapMode::Nearest,

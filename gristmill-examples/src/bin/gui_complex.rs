@@ -1,15 +1,16 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use gristmill::asset::{load_asset, image::{Image, NineSliceImage}};
 use gristmill::game::{Game, Window, run_game};
 use gristmill_gui::{*, quad::Quad, text::{Text, Align}, button::ButtonClass, event::{GuiActionEvent, GuiActionEventRef}, container::*, layout::*, layout_builder::*, listener};
-use gristmill::renderer::{RenderPassInfo, Renderer, RenderContext, SubpassSetup, pass::{RenderPass, GeometryGuiPass}};
+use gristmill::renderer::{RenderLoader, LoadRef, RenderContext, pass::{RenderPass, RenderPass3D2D}};
 use gristmill::color::Color;
 use gristmill::geometry2d::*;
 use gristmill::input::{InputSystem, InputActions, CursorAction, ActionState};
 
-use gristmill_examples::basic_geo_subpass::BasicGeoSubpass;
-use gristmill_gui::renderer::GuiSubpass;
+use gristmill_examples::basic_geo_renderer::BasicGeoRenderer;
+use gristmill_gui::renderer::{GuiRenderer, GuiRendererLoad};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -37,7 +38,6 @@ impl GuiInputActions for GuiGameInput {
 }
 
 struct GuiGame {
-    render_pass: GeometryGuiPass<BasicGeoSubpass, GuiSubpass>,
     scene: Scene,
     input: GuiGameInput,
     player: Player,
@@ -76,6 +76,33 @@ impl Player {
             level: 45,
             stats: PlayerStats { unspent: 3, strength: 1, dexterity: 1, intelligence: 1 },
         }
+    }
+}
+
+struct GuiAssetList {
+    textures: HashMap<String, GuiTexture>
+}
+
+impl GuiAssetList {
+    pub fn get_texture(&self, name: &str) -> GuiTexture {
+        self.textures.get(name).expect("texture not found").clone()
+    }
+    pub fn load(mut gui_loader: LoadRef<GuiRenderer>) -> GuiAssetList {
+        let mut list = GuiAssetList { textures: HashMap::new() };
+
+        let frame_image: NineSliceImage = load_asset("images/FrameSquare").unwrap();
+        list.textures.insert("frame".to_string(), gui_loader.load_nine_slice_image(&frame_image));
+        let button_image: NineSliceImage = load_asset("images/FrameRounded").unwrap();
+        list.textures.insert("button".to_string(), gui_loader.load_nine_slice_image(&button_image));
+        let player_image: Image = load_asset("images/Portrait").unwrap();
+        list.textures.insert("player".to_string(), gui_loader.load_image(&player_image));
+        let perk_image: Image = load_asset("images/Perk1").unwrap();
+        list.textures.insert("perk".to_string(), gui_loader.load_image(&perk_image));
+        let add_image: Image = load_asset("images/Add").unwrap();
+        list.textures.insert("add".to_string(), gui_loader.load_image(&add_image));
+        let sub_image: Image = load_asset("images/Subtract").unwrap();
+        list.textures.insert("sub".to_string(), gui_loader.load_image(&sub_image));
+        list
     }
 }
 
@@ -137,30 +164,17 @@ impl PlayerWindow {
     
         stat_value
     }
-    fn build(gui: &mut Gui, gui_subpass: &mut GuiSubpass, gui_subpass_setup: &mut SubpassSetup) -> PlayerWindow {
-        let frame_image: NineSliceImage = load_asset("images/FrameSquare").unwrap();
-        let frame_texture = gui_subpass.load_nine_slice_image(gui_subpass_setup, &frame_image);
-        let button_image: NineSliceImage = load_asset("images/FrameRounded").unwrap();
-        let button_texture = gui_subpass.load_nine_slice_image(gui_subpass_setup, &button_image);
-        let player_image: Image = load_asset("images/Portrait").unwrap();
-        let player_texture = gui_subpass.load_image(gui_subpass_setup, &player_image);
-        let perk_image: Image = load_asset("images/Perk1").unwrap();
-        let perk_texture = gui_subpass.load_image(gui_subpass_setup, &perk_image);
-        let add_image: Image = load_asset("images/Add").unwrap();
-        let add_texture = gui_subpass.load_image(gui_subpass_setup, &add_image);
-        let sub_image: Image = load_asset("images/Subtract").unwrap();
-        let sub_texture = gui_subpass.load_image(gui_subpass_setup, &sub_image);
-
+    fn build(gui: &mut Gui, asset_list: &GuiAssetList) -> PlayerWindow {
         let mut base_button = ButtonClass::new();
-        base_button.set_texture(button_texture);
+        base_button.set_texture(asset_list.get_texture("button"));
         let base_button = Arc::new(base_button);
 
         let layout = Layout::center_parent(Size::new(384, 256));
-        let root = gui.add_widget(gui.root(), layout, Quad::new_texture(frame_texture)).into();
+        let root = gui.add_widget(gui.root(), layout, Quad::new_texture(asset_list.get_texture("frame"))).into();
         gui.set_event_handler(root);
         let root_layout = BoxLayout::new(root, BoxDirection::Vertical, Padding::new(PlayerWindow::PADDING));
 
-        let (name_text, level_text) = PlayerWindow::build_top(gui, &root_layout, player_texture);
+        let (name_text, level_text) = PlayerWindow::build_top(gui, &root_layout, asset_list.get_texture("player"));
 
         root_layout.add_widget(gui, BoxSize::Exact(1), Quad::new_color(gristmill::color::black()));
         
@@ -172,9 +186,9 @@ impl PlayerWindow {
         
         gui.set_container(left_container, TableContainer::new(&[0, 24, 16, 16], 16, Padding::new_inside(PlayerWindow::PADDING), Some(1)));
         let mut add_button = ButtonClass::new_inherit(base_button.clone());
-        add_button.set_icon(add_texture.clone());
+        add_button.set_icon(asset_list.get_texture("add"));
         let mut sub_button = ButtonClass::new_inherit(base_button.clone());
-        sub_button.set_icon(sub_texture.clone());
+        sub_button.set_icon(asset_list.get_texture("sub"));
         let mut stat_unspent = PlayerWindow::build_stat_row(gui, left_container, "Remaining".to_string(), None);
         let stats = [
             PlayerWindow::build_stat_row(gui, left_container, "Strength".to_string(), Some((0, &mut stat_unspent, &add_button, &sub_button))),
@@ -182,12 +196,14 @@ impl PlayerWindow {
             PlayerWindow::build_stat_row(gui, left_container, "Intelligence".to_string(), Some((2, &mut stat_unspent, &add_button, &sub_button))),
         ];
 
+        let perk_texture = asset_list.get_texture("perk");
+        let perk_texture_size = perk_texture.size().unwrap();
         gui.set_container(right_container, FlowContainer::new(Padding::new_inside(PlayerWindow::PADDING)));
         for _i in 0..10 {
-            gui.add_widget(right_container, Layout::new_size(perk_image.size()), Quad::new_texture(perk_texture.clone()));
+            gui.add_widget(right_container, Layout::new_size(perk_texture_size), Quad::new_texture(perk_texture.clone()));
         }
         add_button.instance_builder()
-            .with_layout(Layout::new_size(perk_image.size()))
+            .with_layout(Layout::new_size(perk_texture_size))
             .build(gui, right_container);
 
         PlayerWindow { root, name_text, level_text, stat_unspent, stats }
@@ -233,28 +249,23 @@ impl PlayerWindow {
 }
 
 impl Game for GuiGame {
-    fn load(renderer: &mut Renderer) -> (Self, RenderPassInfo) {
-        let mut render_pass = GeometryGuiPass::<BasicGeoSubpass, GuiSubpass>::with_clear_color(renderer, Color::new(0.0, 0.8, 0.8, 1.0));
-        let mut gui_subpass_setup = renderer.subpass_setup(render_pass.info(), 1);
+    type RenderPass = RenderPass3D2D<BasicGeoRenderer, GuiRenderer>;
+    fn load(loader: &mut RenderLoader) -> (Self, Self::RenderPass) {
+        let mut render_pass = Self::RenderPass::with_clear_color(loader, Color::new(0.0, 0.8, 0.8, 1.0));
+        let asset_list = GuiAssetList::load(render_pass.scene_render1(loader));
 
         let mut gui = Gui::new();
-        let mut player_window = PlayerWindow::build(&mut gui, render_pass.subpass1(), &mut gui_subpass_setup);
+        let mut player_window = PlayerWindow::build(&mut gui, &asset_list);
 
         let player = Player::new();
         player_window.show(&mut gui, &player);
         
-        let render_pass_info = render_pass.info();
         (GuiGame {
-            render_pass,
             scene: ((), gui),
             input: GuiGameInput::default(),
             player,
             player_window,
-        }, render_pass_info)
-    }
-
-    fn resize(&mut self, dimensions: Size) {
-        self.render_pass.set_dimensions(dimensions);
+        }, render_pass)
     }
 
     fn update(&mut self, _window: &Window, input_system: &mut InputSystem, _delta: f64) -> bool {
@@ -265,8 +276,8 @@ impl Game for GuiGame {
         true
     }
 
-    fn render(&mut self, _renderer: &mut Renderer, context: &mut RenderContext) {
-        self.render_pass.render(context, &mut self.scene);
+    fn render(&mut self, _loader: &mut RenderLoader, context: &mut RenderContext, render_pass: &mut Self::RenderPass) {
+        render_pass.render(context, &mut self.scene);
     }
 }
 

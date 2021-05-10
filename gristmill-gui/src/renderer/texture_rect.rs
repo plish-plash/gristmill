@@ -4,12 +4,12 @@ use vulkano::buffer::{ImmutableBuffer, BufferUsage};
 use vulkano::pipeline::GraphicsPipeline;
 use vulkano::sampler::Filter;
 
-use crate::asset::image::{Image, NineSliceImage};
-use crate::geometry2d::*;
-use crate::renderer::{PipelineArc, SubpassSetup, RenderContext};
+use gristmill::asset::image::{Image, NineSliceImage};
+use gristmill::geometry2d::*;
+use gristmill::renderer::{PipelineArc, LoadContext, RenderContext};
 
-use super::texture::TexturePipeline;
-pub use super::texture::Texture;
+use gristmill::renderer::loader::texture::TextureLoader;
+pub use gristmill::renderer::loader::texture::Texture;
 
 mod vs {
     vulkano_shaders::shader!{
@@ -102,9 +102,9 @@ pub struct TextureRectPipeline {
 }
 
 impl TextureRectPipeline {
-    pub fn new(subpass_setup: &mut SubpassSetup) -> TextureRectPipeline {
-        let vs = vs::Shader::load(subpass_setup.device()).unwrap();
-        let fs = fs::Shader::load(subpass_setup.device()).unwrap();
+    pub fn new(context: &mut LoadContext) -> TextureRectPipeline {
+        let vs = vs::Shader::load(context.device()).unwrap();
+        let fs = fs::Shader::load(context.device()).unwrap();
 
         let pipeline = Arc::new(
             GraphicsPipeline::start()
@@ -114,8 +114,8 @@ impl TextureRectPipeline {
                 .viewports_dynamic_scissors_irrelevant(1)
                 .fragment_shader(fs.main_entry_point(), ())
                 .blend_alpha_blending()
-                .render_pass(subpass_setup.subpass())
-                .build(subpass_setup.device())
+                .render_pass(context.subpass())
+                .build(context.device())
                 .unwrap()
         );
 
@@ -129,9 +129,9 @@ impl TextureRectPipeline {
                 Vertex::new(0., 1.),
             ].into_iter(),
             BufferUsage::vertex_buffer(),
-            subpass_setup.queue(),
+            context.queue(),
         ).unwrap();
-        subpass_setup.queue_join(setup_future);
+        context.load_future(setup_future);
 
         TextureRectPipeline { pipeline, square_vertex_buffer }
     }
@@ -140,7 +140,7 @@ impl TextureRectPipeline {
         context.draw(
             self.pipeline.clone(),
             vec![self.square_vertex_buffer.clone()],
-            texture.descriptor_set.clone(),
+            texture.descriptor_set(),
             push_constants
         );
     }
@@ -148,15 +148,15 @@ impl TextureRectPipeline {
         context.draw(
             self.pipeline.clone(),
             vec![texture.vertex_buffer.clone()],
-            texture.texture.descriptor_set.clone(),
+            texture.texture.descriptor_set(),
             push_constants
         );
     }
     
-    pub fn load_image(&mut self, subpass_setup: &mut SubpassSetup, image: &Image, filter: Filter) -> Texture {
-        TexturePipeline::load_image(&self.pipeline, subpass_setup, image, filter)
+    pub fn load_image(&mut self, context: &mut LoadContext, image: &Image, filter: Filter) -> Texture {
+        TextureLoader::load_image(&self.pipeline, context, image, filter)
     }
-    pub fn load_nine_slice_image(&mut self, subpass_setup: &mut SubpassSetup, image: &NineSliceImage) -> NineSliceTexture {
+    pub fn load_nine_slice_image(&mut self, context: &mut LoadContext, image: &NineSliceImage) -> NineSliceTexture {
         fn vertex_quad(vertices: &mut Vec<Vertex>, corners: &[Vertex; 4], indices: [usize; 2]) {
             let min = Vertex::from_xy(corners[indices[0]], corners[indices[1]]);
             let max = Vertex::from_xy(corners[indices[0] + 1], corners[indices[1] + 1]);
@@ -168,7 +168,7 @@ impl TextureRectPipeline {
             vertices.push(Vertex::from_xy(min, max));
         }
 
-        let texture = self.load_image(subpass_setup, image.as_image(), Filter::Linear);
+        let texture = self.load_image(context, image.as_image(), Filter::Linear);
 
         let size = image.size();
         let slices = image.slices();
@@ -186,9 +186,9 @@ impl TextureRectPipeline {
         let (vertex_buffer, setup_future) = ImmutableBuffer::from_iter(
             verts.into_iter(),
             BufferUsage::vertex_buffer(),
-            subpass_setup.queue(),
+            context.queue(),
         ).unwrap();
-        subpass_setup.queue_join(setup_future);
+        context.load_future(setup_future);
         NineSliceTexture { texture, slices, vertex_buffer }
     }
 }

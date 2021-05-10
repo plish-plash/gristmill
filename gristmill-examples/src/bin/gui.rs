@@ -1,12 +1,12 @@
 use gristmill::game::{Game, Window, run_game};
 use gristmill_gui::{Gui, WidgetNode, GuiInputActions, event::GuiActionEvent, quad::Quad, button::ButtonClass, text::Text, layout::*};
-use gristmill::renderer::{RenderPassInfo, Renderer, RenderContext, pass::{RenderPass, GeometryGuiPass}};
+use gristmill::renderer::{RenderLoader, RenderContext, pass::{RenderPass, RenderPass3D2D}};
 use gristmill::color::Color;
 use gristmill::geometry2d::*;
 use gristmill::input::{InputSystem, InputActions, CursorAction, ActionState};
 
-use gristmill_examples::basic_geo_subpass::BasicGeoSubpass;
-use gristmill_gui::renderer::GuiSubpass;
+use gristmill_examples::basic_geo_renderer::BasicGeoRenderer;
+use gristmill_gui::renderer::GuiRenderer;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -34,7 +34,6 @@ impl GuiInputActions for GuiGameInput {
 }
 
 struct GuiGame {
-    render_pass: GeometryGuiPass<BasicGeoSubpass, GuiSubpass>,
     scene: Scene,
     input: GuiGameInput,
     text: WidgetNode<Text>,
@@ -42,7 +41,8 @@ struct GuiGame {
 }
 
 impl Game for GuiGame {
-    fn load(renderer: &mut Renderer) -> (Self, RenderPassInfo) {
+    type RenderPass = RenderPass3D2D<BasicGeoRenderer, GuiRenderer>;
+    fn load(loader: &mut RenderLoader) -> (Self, Self::RenderPass) {
         let mut gui = Gui::new();
         gui.set_event_handler(gui.root());
 
@@ -65,19 +65,12 @@ impl Game for GuiGame {
         layout.set_anchor(Side::Left, Anchor::previous_sibling(0));
         let text = gui.add_widget(color_rect.into(), layout, Text::new_empty());
 
-        let render_pass = GeometryGuiPass::new(renderer);
-        let render_pass_info = render_pass.info();
         (GuiGame {
-            render_pass,
             scene: ((), gui),
             input: GuiGameInput::default(),
             text,
             times_clicked: 0,
-        }, render_pass_info)
-    }
-
-    fn resize(&mut self, dimensions: Size) {
-        self.render_pass.set_dimensions(dimensions);
+        }, RenderPass3D2D::new(loader))
     }
 
     fn update(&mut self, _window: &Window, input_system: &mut InputSystem, _delta: f64) -> bool {
@@ -99,8 +92,8 @@ impl Game for GuiGame {
         true
     }
 
-    fn render(&mut self, _renderer: &mut Renderer, context: &mut RenderContext) {
-        self.render_pass.render(context, &mut self.scene);
+    fn render(&mut self, _loader: &mut RenderLoader, context: &mut RenderContext, render_pass: &mut Self::RenderPass) {
+        render_pass.render(context, &mut self.scene);
     }
 }
 

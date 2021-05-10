@@ -1,3 +1,6 @@
+mod text;
+mod texture_rect;
+
 use std::sync::Arc;
 
 use vulkano::command_buffer::{AutoCommandBufferBuilder, SubpassContents};
@@ -7,12 +10,15 @@ use rusttype::{PositionedGlyph, Scale, point};
 
 use gristmill::asset::image::{Image, NineSliceImage};
 use gristmill::color::{Color, encode_color};
-use gristmill::renderer::{SubpassSetup, RenderContext, pipeline::{text::{TextHandle, TextPipeline}, texture_rect::{Texture, NineSliceTexture, TextureRectPipeline}}, subpass};
+use gristmill::renderer::{LoadContext, LoadRef, RenderContext, scene};
 use gristmill::geometry2d::{Rect, Size};
 use super::{Gui, font::{Font, fonts}};
 
-type TextureRectConstants = gristmill::renderer::pipeline::texture_rect::PushConstants;
-type TextConstants = gristmill::renderer::pipeline::text::PushConstants;
+use text::{TextHandle, TextPipeline};
+use texture_rect::{Texture, NineSliceTexture, TextureRectPipeline};
+
+type TextureRectConstants = texture_rect::PushConstants;
+type TextConstants = text::PushConstants;
 
 #[derive(Clone)]
 pub enum GuiTexture {
@@ -81,13 +87,13 @@ impl TextMetrics {
 }
 
 pub struct DrawContext<'a> {
-    subpass: &'a mut GuiSubpass,
+    render: &'a mut GuiRenderer,
     text_changed: bool,
 }
 
 impl<'a> DrawContext<'a> {
     pub fn new_color_rect_drawable(&mut self) -> Drawable {
-        Drawable::TextureRect(self.subpass.white_1x1.clone())
+        Drawable::TextureRect(self.render.white_1x1.clone())
     }
     pub fn new_texture_rect_drawable(&mut self, texture: GuiTexture) -> Drawable {
         match texture {
@@ -100,7 +106,7 @@ impl<'a> DrawContext<'a> {
         let font_asset = fonts().get(font);
         let glyphs: Vec<PositionedGlyph> = font_asset.layout(text, Scale::uniform(size), point(0., 0.)).collect();
         let metrics = TextMetrics::new(&glyphs);
-        let handle = self.subpass.text_pipeline.add_section(glyphs);
+        let handle = self.render.text_pipeline.add_section(glyphs);
         self.text_changed = true;
         (Drawable::Text(handle), metrics)
     }
@@ -109,7 +115,7 @@ impl<'a> DrawContext<'a> {
         if let Drawable::TextureNineSlice(tex) = drawable {
             rect = rect.inset(tex.slices());
         }
-        self.subpass.pending_draw_commands.push(DrawCommand {
+        self.render.pending_draw_commands.push(DrawCommand {
             drawable: drawable.clone(),
             rect,
             color: encode_color(color),
@@ -118,13 +124,13 @@ impl<'a> DrawContext<'a> {
 
     fn update_cache(&mut self, builder: &mut AutoCommandBufferBuilder) {
         if self.text_changed {
-            self.subpass.text_pipeline.update_cache(builder);
+            self.render.text_pipeline.update_cache(builder);
             self.text_changed = false;
         }
     }
 }
 
-pub struct GuiSubpass {
+pub struct GuiRenderer {
     texture_rect_pipeline: TextureRectPipeline,
     text_pipeline: TextPipeline,
     screen_dimensions: Size,
@@ -133,30 +139,23 @@ pub struct GuiSubpass {
     white_1x1: Texture,
 }
 
-impl GuiSubpass {
+impl GuiRenderer {
     fn make_context<'a>(&'a mut self) -> DrawContext<'a> {
         self.pending_draw_commands.clear();
-        DrawContext { subpass: self, text_changed: false }
-    }
-
-    pub fn load_image(&mut self, subpass_setup: &mut SubpassSetup, image: &Image) -> GuiTexture {
-        GuiTexture::Simple(self.texture_rect_pipeline.load_image(subpass_setup, image, Filter::Linear))
-    }
-    pub fn load_nine_slice_image(&mut self, subpass_setup: &mut SubpassSetup, image: &NineSliceImage) -> GuiTexture {
-        GuiTexture::NineSlice(self.texture_rect_pipeline.load_nine_slice_image(subpass_setup, image))
+        DrawContext { render: self, text_changed: false }
     }
 }
 
-impl subpass::RenderSubpass for GuiSubpass {
-    type SubpassCategory = subpass::Gui;
+impl scene::SceneRenderer for GuiRenderer {
+    type RenderType = scene::Geometry2D;
     type Scene = Gui;
     fn contents() -> SubpassContents { SubpassContents::Inline }
-    fn new(subpass_setup: &mut SubpassSetup) -> Self {
-        let mut texture_rect_pipeline = TextureRectPipeline::new(subpass_setup);
-        let text_pipeline = TextPipeline::new(subpass_setup);
-        let white_1x1 = texture_rect_pipeline.load_image(subpass_setup, &Image::new_1x1_white(), Filter::Nearest);
+    fn new(context: &mut LoadContext) -> Self {
+        let mut texture_rect_pipeline = TextureRectPipeline::new(context);
+        let text_pipeline = TextPipeline::new(context);
+        let white_1x1 = texture_rect_pipeline.load_image(context, &Image::new_1x1_white(), Filter::Nearest);
 
-        GuiSubpass {
+        GuiRenderer {
             texture_rect_pipeline,
             text_pipeline,
             screen_dimensions: Size::zero(),
@@ -187,5 +186,19 @@ impl subpass::RenderSubpass for GuiSubpass {
                     self.text_pipeline.draw(context, handle, draw_command.text_constants(screen_dimensions)),
             }
         }
+    }
+}
+
+pub trait GuiRendererLoad {
+    fn load_image(&mut self, image: &Image) -> GuiTexture;
+    fn load_nine_slice_image(&mut self, image: &NineSliceImage) -> GuiTexture;
+}
+
+impl<'a> GuiRendererLoad for LoadRef<'a, GuiRenderer> {
+    fn load_image(&mut self, image: &Image) -> GuiTexture {
+        GuiTexture::Simple(self.inner.texture_rect_pipeline.load_image(&mut self.context, image, Filter::Linear))
+    }
+    fn load_nine_slice_image(&mut self, image: &NineSliceImage) -> GuiTexture {
+        GuiTexture::NineSlice(self.inner.texture_rect_pipeline.load_nine_slice_image(&mut self.context, image))
     }
 }

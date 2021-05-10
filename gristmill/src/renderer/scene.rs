@@ -1,29 +1,29 @@
 use vulkano::command_buffer::SubpassContents;
 
-use super::{SubpassSetup, RenderContext};
+use super::{LoadContext, RenderContext};
 use crate::geometry2d::Size;
 
 // -------------------------------------------------------------------------------------------------
 
-pub trait RenderSubpassCategory {}
+pub trait SceneRendererType {}
 
 pub struct Depth;
-impl RenderSubpassCategory for Depth {}
+impl SceneRendererType for Depth {}
 
-pub struct Geometry;
-impl RenderSubpassCategory for Geometry {}
+pub struct Geometry2D;
+impl SceneRendererType for Geometry2D {}
 
-pub struct Gui;
-impl RenderSubpassCategory for Gui {}
+pub struct Geometry3D;
+impl SceneRendererType for Geometry3D {}
 
 pub struct PostProcessing;
-impl RenderSubpassCategory for PostProcessing {}
+impl SceneRendererType for PostProcessing {}
 
-pub trait RenderSubpass {
-    type SubpassCategory: RenderSubpassCategory;
+pub trait SceneRenderer {
+    type RenderType: SceneRendererType;
     type Scene;
     fn contents() -> SubpassContents;
-    fn new(subpass_setup: &mut SubpassSetup) -> Self;
+    fn new(context: &mut LoadContext) -> Self;
     fn set_dimensions(&mut self, _dimensions: Size) {}
     fn pre_render(&mut self, context: &mut RenderContext, scene: &mut Self::Scene);
     fn render(&mut self, context: &mut RenderContext, scene: &mut Self::Scene);
@@ -31,11 +31,11 @@ pub trait RenderSubpass {
 
 // -------------------------------------------------------------------------------------------------
 
-impl<T> RenderSubpass for Option<T> where T: RenderSubpass {
-    type SubpassCategory = T::SubpassCategory;
+impl<T> SceneRenderer for Option<T> where T: SceneRenderer {
+    type RenderType = T::RenderType;
     type Scene = Option<T::Scene>;
     fn contents() -> SubpassContents { T::contents() }
-    fn new(_subpass_setup: &mut SubpassSetup) -> Self { None }
+    fn new(_context: &mut LoadContext) -> Self { None }
     fn set_dimensions(&mut self, dimensions: Size) {
         if let Some(inner) = self.as_mut() {
             inner.set_dimensions(dimensions);
@@ -43,31 +43,31 @@ impl<T> RenderSubpass for Option<T> where T: RenderSubpass {
     }
     fn pre_render(&mut self, context: &mut RenderContext, scene: &mut Self::Scene) {
         if let Some(inner) = self.as_mut() {
-            inner.pre_render(context, scene.as_mut().expect("Scene must be Some if optional subpass is Some"));
+            inner.pre_render(context, scene.as_mut().expect("Scene must be Some if optional renderer is Some"));
         }
     }
     fn render(&mut self, context: &mut RenderContext, scene: &mut Self::Scene) {
         if let Some(inner) = self.as_mut() {
-            inner.render(context, scene.as_mut().expect("Scene must be Some if optional subpass is Some"));
+            inner.render(context, scene.as_mut().expect("Scene must be Some if optional renderer is Some"));
         }
     }
 }
 
-pub trait RenderSubpassOptionExt {
-    fn create_inner(&mut self, subpass_setup: &mut SubpassSetup);
+pub trait SceneRendererOptionExt {
+    fn create_inner(&mut self, context: &mut LoadContext);
     fn destroy_inner(&mut self);
 }
 
-impl<T> RenderSubpassOptionExt for Option<T> where T: RenderSubpass {
-    fn create_inner(&mut self, subpass_setup: &mut SubpassSetup) {
+impl<T> SceneRendererOptionExt for Option<T> where T: SceneRenderer {
+    fn create_inner(&mut self, context: &mut LoadContext) {
         if self.is_some() {
-            panic!("inner subpass already exists");
+            panic!("inner renderer already exists");
         }
-        *self = Some(T::new(subpass_setup));
+        *self = Some(T::new(context));
     }
     fn destroy_inner(&mut self) {
         if self.is_none() {
-            panic!("inner subpass does not exist");
+            panic!("inner renderer does not exist");
         }
         *self = None;
     }

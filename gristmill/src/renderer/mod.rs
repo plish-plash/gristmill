@@ -1,6 +1,6 @@
+pub mod loader;
 pub mod pass;
-pub mod subpass;
-pub mod pipeline;
+pub mod scene;
 mod swapchain;
 
 // -------------------------------------------------------------------------------------------------
@@ -35,34 +35,38 @@ use swapchain::Swapchain;
 
 // -------------------------------------------------------------------------------------------------
 
-type RenderPassArc = Arc<dyn vulkano::framebuffer::RenderPassAbstract + Send + Sync>;
 type FramebufferArc = Arc<dyn vulkano::framebuffer::FramebufferAbstract + Send + Sync>;
-type PipelineArc = Arc<dyn vulkano::pipeline::GraphicsPipelineAbstract + Send + Sync>;
+pub type RenderPassArc = Arc<dyn vulkano::framebuffer::RenderPassAbstract + Send + Sync>;
+pub type PipelineArc = Arc<dyn vulkano::pipeline::GraphicsPipelineAbstract + Send + Sync>;
 
 pub use pass::RenderPass;
-pub type RenderPassInfo = RenderPassArc;
 
 // -------------------------------------------------------------------------------------------------
 
-pub struct SubpassSetup<'a> {
+pub struct LoadContext<'a> {
     queue: Arc<Queue>,
     subpass: Subpass<RenderPassArc>,
     setup_future: &'a mut Option<Box<dyn GpuFuture>>,
 }
 
-impl<'a> SubpassSetup<'a> {
+impl<'a> LoadContext<'a> {
     pub fn device(&self) -> Arc<Device> { self.queue.device().clone() }
     pub fn queue(&self) -> Arc<Queue> { self.queue.clone() }
     pub fn subpass(&self) -> Subpass<RenderPassArc> {
         self.subpass.clone()
     }
-    pub fn queue_join<F>(&mut self, future: F) where F: GpuFuture + 'static {
+    pub fn load_future<F>(&mut self, future: F) where F: GpuFuture + 'static {
         if let Some(prev_future) = self.setup_future.take() {
             *self.setup_future = Some(Box::new(prev_future.join(future)));
         } else {
             *self.setup_future = Some(Box::new(future));
         };
     }
+}
+
+pub struct LoadRef<'a, T> {
+    pub context: LoadContext<'a>,
+    pub inner: &'a mut T,
 }
 
 pub struct RenderContext<'a> {
@@ -94,7 +98,7 @@ struct SwapchainInfo {
     composite_alpha: CompositeAlpha,
 }
 
-pub struct Renderer {
+pub struct RenderLoader {
     device: Arc<Device>,
     surface: Arc<Surface<Window>>,
     swapchain_info: SwapchainInfo,
@@ -103,17 +107,23 @@ pub struct Renderer {
     previous_frame_end: Option<Box<dyn GpuFuture>>,
 }
 
-impl Renderer {
+impl RenderLoader {
     pub fn device(&self) -> Arc<Device> { self.device.clone() }
     pub fn graphics_queue(&self) -> Arc<Queue> { self.graphics_queue.clone() }
     //pub fn transfer_queue(&self) -> Arc<Queue> { self.transfer_queue.clone() }
     pub fn swapchain_format(&self) -> Format { self.swapchain_info.format }
 
-    pub fn subpass_setup(&mut self, render_pass: RenderPassArc, id: u32) -> SubpassSetup {
-        SubpassSetup {
+    fn load_context(&mut self, render_pass: RenderPassArc, subpass_id: u32) -> LoadContext {
+        LoadContext {
             queue: self.graphics_queue(),
-            subpass: Subpass::from(render_pass, id).unwrap(),
+            subpass: Subpass::from(render_pass, subpass_id).unwrap(),
             setup_future: &mut self.previous_frame_end,
+        }
+    }
+    fn load_ref_subpass<'a, T>(&'a mut self, render_pass: RenderPassArc, subpass_id: u32, subpass: &'a mut T) -> LoadRef<'a, T> {
+        LoadRef {
+            context: self.load_context(render_pass, subpass_id),
+            inner: subpass,
         }
     }
 
@@ -121,7 +131,7 @@ impl Renderer {
         Some(sync::now(self.device()).boxed())
     }
 
-    pub(crate) fn create_window() -> (Renderer, EventLoop<()>) {
+    pub(crate) fn create_window() -> (RenderLoader, EventLoop<()>) {
         let required_extensions = vulkano_win::required_extensions();
         let instance = Instance::new(None, &required_extensions, None).unwrap();
 
@@ -172,7 +182,7 @@ impl Renderer {
             format: caps.supported_formats[0].0,
         };
 
-        (Renderer {
+        (RenderLoader {
             device,
             surface,
             swapchain_info,
@@ -185,35 +195,38 @@ impl Renderer {
 // -------------------------------------------------------------------------------------------------
 
 pub(crate) struct RenderLoop<G> where G: Game {
-    renderer: Renderer,
+    loader: RenderLoader,
     swapchain: Swapchain,
     recreate_swapchain: bool,
     game: G,
+    render_pass: G::RenderPass,
     input_system: InputSystem,
 }
 
 impl<G> RenderLoop<G> where G: Game {
-    pub fn new(mut renderer: Renderer, mut game: G, render_pass: RenderPassArc, input_system: InputSystem) -> RenderLoop<G> {
-        let swapchain = Swapchain::create(&mut renderer, render_pass);
+    pub fn new(mut loader: RenderLoader, mut game: G, mut render_pass: G::RenderPass, input_system: InputSystem) -> RenderLoop<G> {
+        let swapchain = Swapchain::create(&mut loader, render_pass.info());
         game.resize(swapchain.dimensions());
-        if renderer.previous_frame_end.is_none() {
-            renderer.previous_frame_end = renderer.now_future();
+        render_pass.set_dimensions(swapchain.dimensions());
+        if loader.previous_frame_end.is_none() {
+            loader.previous_frame_end = loader.now_future();
         }
         RenderLoop {
-            renderer,
+            loader,
             swapchain,
             recreate_swapchain: false,
             game,
+            render_pass,
             input_system,
         }
     }
 }
 
 impl<G> GameLoop for RenderLoop<G> where G: Game + 'static {
-    fn window(&self) -> &Window { self.renderer.surface.window() }
+    fn window(&self) -> &Window { self.loader.surface.window() }
     fn update(&mut self, delta: f64) -> bool {
         self.input_system.start_frame();
-        let continue_loop = self.game.update(self.renderer.surface.window(), &mut self.input_system, delta);
+        let continue_loop = self.game.update(self.loader.surface.window(), &mut self.input_system, delta);
         self.input_system.end_frame();
         continue_loop
     }
@@ -231,11 +244,12 @@ impl<G> GameLoop for RenderLoop<G> where G: Game + 'static {
     fn render(&mut self) {
         // Calling this function polls various fences in order to determine what the GPU has
         // already processed, and frees the resources that are no longer needed.
-        self.renderer.previous_frame_end.as_mut().unwrap().cleanup_finished();
+        self.loader.previous_frame_end.as_mut().unwrap().cleanup_finished();
 
         if self.recreate_swapchain {
-            if self.swapchain.recreate(&self.renderer.surface) {
+            if self.swapchain.recreate(&self.loader.surface) {
                 self.game.resize(self.swapchain.dimensions());
+                self.render_pass.set_dimensions(self.swapchain.dimensions());
                 self.recreate_swapchain = false;
             }
             else {
@@ -266,16 +280,16 @@ impl<G> GameLoop for RenderLoop<G> where G: Game + 'static {
             self.recreate_swapchain = true;
         }
 
-        let queue = self.renderer.graphics_queue();
-        let mut builder = AutoCommandBufferBuilder::primary_one_time_submit(self.renderer.device(), queue.family()).unwrap();
+        let queue = self.loader.graphics_queue();
+        let mut builder = AutoCommandBufferBuilder::primary_one_time_submit(self.loader.device(), queue.family()).unwrap();
         {
             let framebuffer = self.swapchain.get_framebuffer(image_num);
             let mut render_context = RenderContext { framebuffer, builder: &mut builder, dynamic_state: &self.swapchain.dynamic_state };
-            self.game.render(&mut self.renderer, &mut render_context);
+            self.game.render(&mut self.loader, &mut render_context, &mut self.render_pass);
         }
         let command_buffer = builder.build().unwrap();
 
-        let future = self.renderer.previous_frame_end
+        let future = self.loader.previous_frame_end
             .take()
             .unwrap()
             .join(acquire_future)
@@ -284,17 +298,17 @@ impl<G> GameLoop for RenderLoop<G> where G: Game + 'static {
             .then_swapchain_present(queue, self.swapchain.swapchain(), image_num)
             .then_signal_fence_and_flush();
 
-        self.renderer.previous_frame_end = match future {
+        self.loader.previous_frame_end = match future {
             Ok(future) => {
                 Some(future.boxed())
             }
             Err(FlushError::OutOfDate) => {
                 self.recreate_swapchain = true;
-                self.renderer.now_future()
+                self.loader.now_future()
             }
             Err(e) => {
                 println!("Failed to flush future: {:?}", e);
-                self.renderer.now_future()
+                self.loader.now_future()
             }
         };
     }

@@ -14,7 +14,7 @@ use vulkano::format::Format;
 
 use winit::window::Window;
 
-use super::{RenderPassArc, FramebufferArc, Renderer};
+use super::{RenderPassArc, FramebufferArc, RenderLoader};
 use crate::geometry2d::Size;
 
 // -------------------------------------------------------------------------------------------------
@@ -30,19 +30,19 @@ pub struct Swapchain {
 }
 
 impl Swapchain {
-    pub fn create(renderer: &mut Renderer, render_pass: RenderPassArc) -> Self {
-        let dimensions: [u32; 2] = renderer.surface.window().inner_size().into();
+    pub fn create(loader: &mut RenderLoader, render_pass: RenderPassArc) -> Self {
+        let dimensions: [u32; 2] = loader.surface.window().inner_size().into();
         let (swapchain, images) = vulkano::swapchain::Swapchain::new(
-            renderer.device.clone(),
-            renderer.surface.clone(),
-            renderer.swapchain_info.image_count,
-            renderer.swapchain_info.format,
+            loader.device.clone(),
+            loader.surface.clone(),
+            loader.swapchain_info.image_count,
+            loader.swapchain_info.format,
             dimensions,
             1,
             ImageUsage::color_attachment(),
-            &renderer.graphics_queue,
+            &loader.graphics_queue,
             SurfaceTransform::Identity,
-            renderer.swapchain_info.composite_alpha,
+            loader.swapchain_info.composite_alpha,
             PresentMode::Fifo,
             FullscreenExclusive::Default,
             true,

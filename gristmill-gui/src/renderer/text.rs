@@ -14,9 +14,9 @@ use vulkano::sampler::{Sampler, Filter, MipmapMode, SamplerAddressMode};
 use rusttype::PositionedGlyph;
 use rusttype::gpu_cache::Cache;
 
-use crate::renderer::{PipelineArc, SubpassSetup, RenderContext};
-use crate::util::handle::HandleOwner;
-use crate::new_handle_type;
+use gristmill::renderer::{PipelineArc, LoadContext, RenderContext};
+use gristmill::util::handle::HandleOwner;
+use gristmill::new_handle_type;
 
 const TEXT_CACHE_WIDTH: u32 = 1000;
 const TEXT_CACHE_HEIGHT: u32 = 1000;
@@ -103,9 +103,9 @@ pub struct TextPipeline {
 }
 
 impl TextPipeline {
-    pub fn new(subpass_setup: &mut SubpassSetup) -> TextPipeline {
-        let vs = vs::Shader::load(subpass_setup.device()).unwrap();
-        let fs = fs::Shader::load(subpass_setup.device()).unwrap();
+    pub fn new(context: &mut LoadContext) -> TextPipeline {
+        let vs = vs::Shader::load(context.device()).unwrap();
+        let fs = fs::Shader::load(context.device()).unwrap();
 
         let pipeline = Arc::new(
             GraphicsPipeline::start()
@@ -115,8 +115,8 @@ impl TextPipeline {
                 .viewports_dynamic_scissors_irrelevant(1)
                 .fragment_shader(fs.main_entry_point(), ())
                 .blend_alpha_blending()
-                .render_pass(subpass_setup.subpass())
-                .build(subpass_setup.device())
+                .render_pass(context.subpass())
+                .build(context.device())
                 .unwrap()
         );
 
@@ -124,7 +124,7 @@ impl TextPipeline {
         let cache_pixel_buffer = vec!(0; (TEXT_CACHE_WIDTH * TEXT_CACHE_HEIGHT) as usize);
 
         let cache_image = StorageImage::with_usage(
-            subpass_setup.device(),
+            context.device(),
             ImageDimensions::Dim2d { width: TEXT_CACHE_WIDTH, height: TEXT_CACHE_HEIGHT, array_layers: 1 },
             R8Unorm,
             ImageUsage {
@@ -133,12 +133,12 @@ impl TextPipeline {
                 .. ImageUsage::none()
             },
             ImageCreateFlags::none(),
-            vec![subpass_setup.queue().family()], // TODO should be BOTH graphics and transfer queue families.
+            vec![context.queue().family()], // TODO should be BOTH graphics and transfer queue families.
         ).unwrap();
         let cache_image_view = ImageView::new(cache_image.clone()).unwrap();
 
         let sampler = Sampler::new(
-            subpass_setup.device(),
+            context.device(),
             Filter::Linear,
             Filter::Linear,
             MipmapMode::Nearest,

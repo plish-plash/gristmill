@@ -1,10 +1,13 @@
+mod atlas_rect;
+
 use vulkano::command_buffer::SubpassContents;
 
 use gristmill::asset::image::{Image, TileAtlasImage};
-use gristmill::renderer::{SubpassSetup, RenderContext, pipeline::atlas_rect::{Texture, TileAtlasTexture, AtlasRectPipeline}, subpass};
+use gristmill::renderer::{LoadContext, RenderContext, scene};
 use gristmill::geometry2d::*;
 
 use super::{Entity, World};
+use atlas_rect::{Texture, TileAtlasTexture, AtlasRectPipeline};
 
 #[derive(Clone)]
 pub enum Sprite {
@@ -12,21 +15,21 @@ pub enum Sprite {
     Tile(TileAtlasTexture, Index2D),
 }
 
-pub struct SpriteSubpass {
+pub struct SpriteRenderer {
     atlas_rect_pipeline: AtlasRectPipeline,
     scale: u32,
 }
 
-impl SpriteSubpass {
+impl SpriteRenderer {
     pub fn set_scale(&mut self, scale: u32) {
         self.scale = scale;
     }
     
-    pub fn load_image(&mut self, subpass_setup: &mut SubpassSetup, image: &Image) -> Sprite {
-        Sprite::Texture(self.atlas_rect_pipeline.load_image(subpass_setup, image))
+    pub fn load_image(&mut self, context: &mut LoadContext, image: &Image) -> Sprite {
+        Sprite::Texture(self.atlas_rect_pipeline.load_image(context, image))
     }
-    pub fn load_tile_image(&mut self, subpass_setup: &mut SubpassSetup, image: &TileAtlasImage) -> Sprite {
-        Sprite::Tile(self.atlas_rect_pipeline.load_tile_image(subpass_setup, image), Index2D::default())
+    pub fn load_tile_image(&mut self, context: &mut LoadContext, image: &TileAtlasImage) -> Sprite {
+        Sprite::Tile(self.atlas_rect_pipeline.load_tile_image(context, image), Index2D::default())
     }
 
     fn render_entity(&mut self, context: &mut RenderContext, scene: &World, entity: Entity, parent_position: Point) {
@@ -45,13 +48,13 @@ impl SpriteSubpass {
     }
 }
 
-impl subpass::RenderSubpass for SpriteSubpass {
-    type SubpassCategory = subpass::Geometry;
+impl scene::SceneRenderer for SpriteRenderer {
+    type RenderType = scene::Geometry2D;
     type Scene = World;
     fn contents() -> SubpassContents { SubpassContents::Inline }
-    fn new(subpass_setup: &mut SubpassSetup) -> Self {
-        let atlas_rect_pipeline = AtlasRectPipeline::new(subpass_setup);
-        SpriteSubpass { atlas_rect_pipeline, scale: 1 }
+    fn new(context: &mut LoadContext) -> Self {
+        let atlas_rect_pipeline = AtlasRectPipeline::new(context);
+        SpriteRenderer { atlas_rect_pipeline, scale: 1 }
     }
     fn set_dimensions(&mut self, dimensions: Size) {
         let width = dimensions.width as f32 / self.scale as f32;

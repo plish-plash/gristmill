@@ -6,7 +6,7 @@ use winit::{
 };
 
 use super::asset::load_asset;
-use super::renderer::{RenderPassInfo, RenderContext, Renderer, RenderLoop};
+use super::renderer::{RenderPass, RenderContext, RenderLoader, RenderLoop};
 use super::input::{InputSystem, InputBindings};
 use super::geometry2d::Size;
 
@@ -66,15 +66,16 @@ pub trait GameLoop: Sized + 'static {
 // -------------------------------------------------------------------------------------------------
 
 pub trait Game: Sized + 'static {
-    fn load(renderer: &mut Renderer) -> (Self, RenderPassInfo);
-    fn resize(&mut self, dimensions: Size);
+    type RenderPass: RenderPass;
+    fn load(loader: &mut RenderLoader) -> (Self, Self::RenderPass);
+    fn resize(&mut self, _dimensions: Size) {}
     fn update(&mut self, window: &Window, input_system: &mut InputSystem, delta: f64) -> bool;
-    fn render(&mut self, renderer: &mut Renderer, context: &mut RenderContext);
+    fn render(&mut self, loader: &mut RenderLoader, context: &mut RenderContext, render_pass: &mut Self::RenderPass);
 }
 
 pub fn run_game<G: Game>() -> ! {
     let input_bindings = load_asset::<InputBindings>("controls").unwrap();
-    let (mut renderer, event_loop) = Renderer::create_window();
-    let (game, render_pass) = G::load(&mut renderer);
-    RenderLoop::new(renderer, game, render_pass, InputSystem::new(input_bindings)).start(event_loop)
+    let (mut loader, event_loop) = RenderLoader::create_window();
+    let (game, render_pass) = G::load(&mut loader);
+    RenderLoop::new(loader, game, render_pass, InputSystem::new(input_bindings)).start(event_loop)
 }

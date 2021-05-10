@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use vulkano::format::{Format, ClearValue};
 
-use super::{RenderPassInfo, RenderContext, Renderer, subpass::*};
+use super::{RenderPassArc, RenderContext, RenderLoader, LoadRef, scene::*};
 use crate::color;
 use crate::geometry2d::Size;
 
@@ -10,32 +10,32 @@ use crate::geometry2d::Size;
 
 pub trait RenderPass: Sized {
     type Scene;
-    fn info(&self) -> RenderPassInfo;
+    fn info(&self) -> RenderPassArc;
     fn set_dimensions(&mut self, dimensions: Size);
     fn render(&mut self, context: &mut RenderContext, scene: &mut Self::Scene);
 }
 
 // -------------------------------------------------------------------------------------------------
 
-pub struct GeometryPass<T> where T: RenderSubpass<SubpassCategory=Geometry> {
-    info: RenderPassInfo,
-    subpass: T,
+pub struct RenderPass3D<T> where T: SceneRenderer<RenderType=Geometry3D> {
+    info: RenderPassArc,
     clear_values: Vec<ClearValue>,
+    scene_render: T,
 }
 
-impl<T> GeometryPass<T> where T: RenderSubpass<SubpassCategory=Geometry> {
-    pub fn new(renderer: &mut Renderer) -> GeometryPass<T> {
-        Self::with_clear_color(renderer, color::black())
+impl<T> RenderPass3D<T> where T: SceneRenderer<RenderType=Geometry3D> {
+    pub fn new(loader: &mut RenderLoader) -> RenderPass3D<T> {
+        Self::with_clear_color(loader, color::black())
     }
-    pub fn with_clear_color(renderer: &mut Renderer, clear_color: color::Color) -> GeometryPass<T> {
+    pub fn with_clear_color(loader: &mut RenderLoader, clear_color: color::Color) -> RenderPass3D<T> {
         let info = Arc::new(
             vulkano::single_pass_renderpass!(
-                renderer.device(),
+                loader.device(),
                 attachments: {
                     color: {
                         load: Clear,
                         store: Store,
-                        format: renderer.swapchain_format(),
+                        format: loader.swapchain_format(),
                         samples: 1,
                     },
                     depth: {
@@ -52,47 +52,47 @@ impl<T> GeometryPass<T> where T: RenderSubpass<SubpassCategory=Geometry> {
             ).unwrap(),
         );
 
-        let subpass = T::new(&mut renderer.subpass_setup(info.clone(), 0));
         let clear_values = vec![color::encode_color(clear_color).into(), 1f32.into()];
-        GeometryPass { info, subpass, clear_values }
+        let scene_render = T::new(&mut loader.load_context(info.clone(), 0));
+        RenderPass3D { info, clear_values, scene_render }
     }
-    pub fn subpass(&mut self) -> &mut T { &mut self.subpass }
+    pub fn scene_render<'a>(&'a mut self, loader: &'a mut RenderLoader) -> LoadRef<'a, T> { loader.load_ref_subpass(self.info.clone(), 0, &mut self.scene_render) }
 }
 
-impl<T> RenderPass for GeometryPass<T> where T: RenderSubpass<SubpassCategory=Geometry> {
+impl<T> RenderPass for RenderPass3D<T> where T: SceneRenderer<RenderType=Geometry3D> {
     type Scene = T::Scene;
-    fn info(&self) -> RenderPassInfo { self.info.clone() }
+    fn info(&self) -> RenderPassArc { self.info.clone() }
     fn set_dimensions(&mut self, dimensions: Size) {
-        self.subpass.set_dimensions(dimensions);
+        self.scene_render.set_dimensions(dimensions);
     }
     fn render(&mut self, context: &mut RenderContext, scene: &mut Self::Scene) {
-        self.subpass.pre_render(context, scene);
+        self.scene_render.pre_render(context, scene);
         context.builder.begin_render_pass(context.framebuffer.clone(), T::contents(), self.clear_values.clone()).unwrap();
-        self.subpass.render(context, scene);
+        self.scene_render.render(context, scene);
         context.builder.end_render_pass().unwrap();
     }
 }
 
-pub struct GeometryGuiPass<T1, T2> where T1: RenderSubpass<SubpassCategory=Geometry>, T2: RenderSubpass<SubpassCategory=Gui> {
-    info: RenderPassInfo,
-    subpass0: T1,
-    subpass1: T2,
+pub struct RenderPass3D2D<T0, T1> where T0: SceneRenderer<RenderType=Geometry3D>, T1: SceneRenderer<RenderType=Geometry2D> {
+    info: RenderPassArc,
     clear_values: Vec<ClearValue>,
+    scene_render0: T0,
+    scene_render1: T1,
 }
 
-impl<T1, T2> GeometryGuiPass<T1, T2> where T1: RenderSubpass<SubpassCategory=Geometry>, T2: RenderSubpass<SubpassCategory=Gui> {
-    pub fn new(renderer: &mut Renderer) -> GeometryGuiPass<T1, T2> {
-        Self::with_clear_color(renderer, color::black())
+impl<T0, T1> RenderPass3D2D<T0, T1> where T0: SceneRenderer<RenderType=Geometry3D>, T1: SceneRenderer<RenderType=Geometry2D> {
+    pub fn new(loader: &mut RenderLoader) -> RenderPass3D2D<T0, T1> {
+        Self::with_clear_color(loader, color::black())
     }
-    pub fn with_clear_color(renderer: &mut Renderer, clear_color: color::Color) -> GeometryGuiPass<T1, T2> {
+    pub fn with_clear_color(loader: &mut RenderLoader, clear_color: color::Color) -> RenderPass3D2D<T0, T1> {
         let info = Arc::new(
             vulkano::ordered_passes_renderpass!(
-                renderer.device(),
+                loader.device(),
                 attachments: {
                     color: {
                         load: Clear,
                         store: Store,
-                        format: renderer.swapchain_format(),
+                        format: loader.swapchain_format(),
                         samples: 1,
                     },
                     depth: {
@@ -117,29 +117,29 @@ impl<T1, T2> GeometryGuiPass<T1, T2> where T1: RenderSubpass<SubpassCategory=Geo
             ).unwrap(),
         );
 
-        let subpass0 = T1::new(&mut renderer.subpass_setup(info.clone(), 0));
-        let subpass1 = T2::new(&mut renderer.subpass_setup(info.clone(), 1));
         let clear_values = vec![color::encode_color(clear_color).into(), 1f32.into()];
-        GeometryGuiPass { info, subpass0, subpass1, clear_values }
+        let scene_render0 = T0::new(&mut loader.load_context(info.clone(), 0));
+        let scene_render1 = T1::new(&mut loader.load_context(info.clone(), 1));
+        RenderPass3D2D { info, clear_values, scene_render0, scene_render1 }
     }
-    pub fn subpass0(&mut self) -> &mut T1 { &mut self.subpass0 }
-    pub fn subpass1(&mut self) -> &mut T2 { &mut self.subpass1 }
+    pub fn scene_render0<'a>(&'a mut self, loader: &'a mut RenderLoader) -> LoadRef<'a, T0> { loader.load_ref_subpass(self.info.clone(), 0, &mut self.scene_render0) }
+    pub fn scene_render1<'a>(&'a mut self, loader: &'a mut RenderLoader) -> LoadRef<'a, T1> { loader.load_ref_subpass(self.info.clone(), 1, &mut self.scene_render1) }
 }
 
-impl<T1, T2> RenderPass for GeometryGuiPass<T1, T2> where T1: RenderSubpass<SubpassCategory=Geometry>, T2: RenderSubpass<SubpassCategory=Gui> {
-    type Scene = (T1::Scene, T2::Scene);
-    fn info(&self) -> RenderPassInfo { self.info.clone() }
+impl<T0, T1> RenderPass for RenderPass3D2D<T0, T1> where T0: SceneRenderer<RenderType=Geometry3D>, T1: SceneRenderer<RenderType=Geometry2D> {
+    type Scene = (T0::Scene, T1::Scene);
+    fn info(&self) -> RenderPassArc { self.info.clone() }
     fn set_dimensions(&mut self, dimensions: Size) {
-        self.subpass0.set_dimensions(dimensions);
-        self.subpass1.set_dimensions(dimensions);
+        self.scene_render0.set_dimensions(dimensions);
+        self.scene_render1.set_dimensions(dimensions);
     }
     fn render(&mut self, context: &mut RenderContext, scene: &mut Self::Scene) {
-        self.subpass0.pre_render(context, &mut scene.0);
-        self.subpass1.pre_render(context, &mut scene.1);
-        context.builder.begin_render_pass(context.framebuffer.clone(), T1::contents(), self.clear_values.clone()).unwrap();
-        self.subpass0.render(context, &mut scene.0);
-        context.builder.next_subpass(T2::contents()).unwrap();
-        self.subpass1.render(context, &mut scene.1);
+        self.scene_render0.pre_render(context, &mut scene.0);
+        self.scene_render1.pre_render(context, &mut scene.1);
+        context.builder.begin_render_pass(context.framebuffer.clone(), T0::contents(), self.clear_values.clone()).unwrap();
+        self.scene_render0.render(context, &mut scene.0);
+        context.builder.next_subpass(T1::contents()).unwrap();
+        self.scene_render1.render(context, &mut scene.1);
         context.builder.end_render_pass().unwrap();
     }
 }

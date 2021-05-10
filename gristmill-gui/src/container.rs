@@ -95,10 +95,10 @@ impl Container for TableContainer {
             let padding = if let Some(padding) = self.between_column_padding { padding } else { self.padding.inside() };
             Point::new(last_top_right.x + padding, last_top_right.y)
         } else {
-            self.last_row = row;
             let y = self.last_rect.bottom_left().y + self.padding.inside();
             Point::new(self.padding.outside(), y)
         };
+        self.last_row = row;
         let child_rect = Rect::new(child_position, Size::new(self.column_width(col, rect.size.width), self.row_height));
         self.last_rect = child_rect;
         Layout::offset_parent(child_rect)

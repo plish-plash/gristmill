@@ -4,13 +4,13 @@ use vulkano::buffer::{ImmutableBuffer, BufferUsage};
 use vulkano::pipeline::GraphicsPipeline;
 use vulkano::sampler::Filter;
 
-use crate::asset::image::{Image, TileAtlasImage};
-use crate::color::{Color, encode_color};
-use crate::geometry2d::*;
-use crate::renderer::{PipelineArc, SubpassSetup, RenderContext};
+use gristmill::asset::image::{Image, TileAtlasImage};
+use gristmill::color::{Color, encode_color};
+use gristmill::geometry2d::*;
+use gristmill::renderer::{PipelineArc, LoadContext, RenderContext};
 
-use super::texture::TexturePipeline;
-pub use super::texture::Texture;
+use gristmill::renderer::loader::texture::TextureLoader;
+pub use gristmill::renderer::loader::texture::Texture;
 
 mod vs {
     vulkano_shaders::shader!{
@@ -117,9 +117,9 @@ pub struct AtlasRectPipeline {
 }
 
 impl AtlasRectPipeline {
-    pub fn new(subpass_setup: &mut SubpassSetup) -> AtlasRectPipeline {
-        let vs = vs::Shader::load(subpass_setup.device()).unwrap();
-        let fs = fs::Shader::load(subpass_setup.device()).unwrap();
+    pub fn new(context: &mut LoadContext) -> AtlasRectPipeline {
+        let vs = vs::Shader::load(context.device()).unwrap();
+        let fs = fs::Shader::load(context.device()).unwrap();
 
         let pipeline = Arc::new(
             GraphicsPipeline::start()
@@ -129,8 +129,8 @@ impl AtlasRectPipeline {
                 .viewports_dynamic_scissors_irrelevant(1)
                 .fragment_shader(fs.main_entry_point(), ())
                 .blend_alpha_blending()
-                .render_pass(subpass_setup.subpass())
-                .build(subpass_setup.device())
+                .render_pass(context.subpass())
+                .build(context.device())
                 .unwrap()
         );
 
@@ -144,9 +144,9 @@ impl AtlasRectPipeline {
                 Vertex::new(0., 1.),
             ].into_iter(),
             BufferUsage::vertex_buffer(),
-            subpass_setup.queue(),
+            context.queue(),
         ).unwrap();
-        subpass_setup.queue_join(setup_future);
+        context.load_future(setup_future);
 
         AtlasRectPipeline { pipeline, square_vertex_buffer, screen_dimensions: [0., 0.] }
     }
@@ -166,7 +166,7 @@ impl AtlasRectPipeline {
         context.draw(
             self.pipeline.clone(),
             vec![self.square_vertex_buffer.clone()],
-            texture.descriptor_set.clone(),
+            texture.descriptor_set(),
             push_constants
         );
     }
@@ -178,11 +178,11 @@ impl AtlasRectPipeline {
         self.draw_rect(context, position, &texture.texture, region, color);
     }
     
-    pub fn load_image(&mut self, subpass_setup: &mut SubpassSetup, image: &Image) -> Texture {
-        TexturePipeline::load_image(&self.pipeline, subpass_setup, image, Filter::Nearest)
+    pub fn load_image(&mut self, context: &mut LoadContext, image: &Image) -> Texture {
+        TextureLoader::load_image(&self.pipeline, context, image, Filter::Nearest)
     }
-    pub fn load_tile_image(&mut self, subpass_setup: &mut SubpassSetup, image: &TileAtlasImage) -> TileAtlasTexture {
-        let texture = TexturePipeline::load_image(&self.pipeline, subpass_setup, image.as_image(), Filter::Nearest);
+    pub fn load_tile_image(&mut self, context: &mut LoadContext, image: &TileAtlasImage) -> TileAtlasTexture {
+        let texture = TextureLoader::load_image(&self.pipeline, context, image.as_image(), Filter::Nearest);
         TileAtlasTexture {
             texture,
             tile_size: image.tile_size(),
