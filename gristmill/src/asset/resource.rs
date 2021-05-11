@@ -2,11 +2,12 @@ use std::collections::HashMap;
 
 use serde::{Serialize, Deserialize};
 
+use super::{Asset, AssetExt, AssetResult, category};
 use crate::impl_ron_asset;
 
 // -------------------------------------------------------------------------------------------------
 
-#[derive(Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Dimensions(HashMap<String, i32>);
 
@@ -26,15 +27,25 @@ impl From<(String, String, String)> for AssetItem {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 pub struct AssetList {
+    #[serde(skip)]
+    name: String,
     loader: String,
     assets: Vec<AssetItem>,
 }
 
-impl_ron_asset!(AssetList, Resource);
+impl Asset for AssetList {
+    type Category = category::Resource;
+    fn read(asset_path: &str) -> AssetResult<Self> {
+        let mut list: AssetList = Self::read_ron(asset_path)?;
+        list.name = asset_path.to_owned();
+        Ok(list)
+    }
+}
 
 impl AssetList {
+    pub fn name(&self) -> &str { &self.name }
     pub fn loader(&self) -> &str { &self.loader }
     pub fn iter(&self) -> std::slice::Iter<AssetItem> { self.assets.iter() }
 }

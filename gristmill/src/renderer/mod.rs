@@ -131,14 +131,18 @@ impl RenderLoader {
     }
 
     pub fn load_assets<'a, L>(&'a mut self, render_pass: &'a mut L::RenderPass, asset_list: &AssetList) -> L::Output where L: AssetListLoader<'a> {
-        // TODO error handling... as usual
+        if asset_list.loader().is_empty() {
+            return Default::default();
+        }
         if asset_list.loader() != L::name() {
-            panic!("AssetList loader is the wrong type");
+            log::error!("Invalid loader for asset list {} (expected \"{}\", got \"{}\")", asset_list.name(), L::name(), asset_list.loader());
+            return Default::default();
         }
         let mut list = L::new(self, render_pass);
         for item in asset_list.iter() {
             list.load(item);
         }
+        log::debug!("Renderer loaded asset list {}", asset_list.name());
         list.finish()
     }
 
@@ -153,7 +157,7 @@ impl RenderLoader {
         // For the sake of the example we are just going to use the first device, which should work
         // most of the time.
         let physical = PhysicalDevice::enumerate(&instance).next().unwrap();
-        println!(
+        log::debug!(
             "Using device: {} (type: {:?})",
             physical.name(),
             physical.ty()
@@ -322,7 +326,7 @@ impl<G> GameLoop for RenderLoop<G> where G: Game + 'static {
                 self.loader.now_future()
             }
             Err(e) => {
-                println!("Failed to flush future: {:?}", e);
+                log::warn!("Failed to flush future: {:?}", e);
                 self.loader.now_future()
             }
         };

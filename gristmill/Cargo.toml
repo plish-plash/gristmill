@@ -7,10 +7,12 @@ edition = "2018"
 [dependencies]
 
 # Core
+log = "0.4"
+env_logger = "0.8"
 serde = "1.0"
 ron = "0.6"
 slotmap = { version = "1.0", features = ["serde"] }
-palette = "*"
+palette = "0.5"
 
 # Graphics
 vulkano = "0.22"
@@ -18,4 +20,4 @@ vulkano-win = "0.22"
 winit = { version = "0.24", features = ["serde"] }
 
 # Assets
-png = "*"
+png = "0.16"

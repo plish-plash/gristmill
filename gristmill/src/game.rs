@@ -5,6 +5,7 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
 };
 
+use super::init_logging;
 use super::asset::{Asset, Resources};
 use super::renderer::{RenderPass, RenderContext, RenderLoader, RenderLoop};
 use super::input::{InputSystem, InputBindings};
@@ -74,8 +75,12 @@ pub trait Game: Sized + 'static {
 }
 
 pub fn run_game<G: Game>(resources: Resources) -> ! {
+    init_logging();
+    log::info!("Starting up...");
     let input_bindings = InputBindings::read("controls").unwrap();
+    log::debug!("Loaded {} input bindings", input_bindings.len());
     let (mut loader, event_loop) = RenderLoader::create_window();
     let (game, render_pass) = G::load(resources, &mut loader);
+    log::info!("Setup finished, entering main loop");
     RenderLoop::new(loader, game, render_pass, InputSystem::new(input_bindings)).start(event_loop)
 }

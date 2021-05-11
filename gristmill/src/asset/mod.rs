@@ -3,7 +3,7 @@ pub mod resource;
 
 use std::any::Any;
 use std::collections::HashMap;
-use std::io;
+use std::{fmt, io};
 use std::fs::File;
 use std::path::PathBuf;
 
@@ -38,6 +38,16 @@ pub enum AssetError {
 impl From<io::Error> for AssetError {
     fn from(err: io::Error) -> AssetError {
         AssetError::Io(err)
+    }
+}
+
+impl fmt::Display for AssetError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AssetError::InvalidData => write!(f, "invalid data"),
+            AssetError::InvalidFormat(info) => write!(f, "{}", info),
+            AssetError::Io(error) => write!(f, "{}", error),
+        }
     }
 }
 
@@ -77,6 +87,15 @@ pub mod category {
 pub trait Asset: Sized {
     type Category: AssetCategory;
     fn read(asset_path: &str) -> AssetResult<Self>;
+    fn try_read(asset_path: &str) -> Option<Self> {
+        match Self::read(asset_path) {
+            Ok(asset) => Some(asset),
+            Err(error) => {
+                log::error!("Failed to load asset {}: {}", asset_path, error);
+                None
+            }
+        }
+    }
 }
 
 pub trait AssetExt {
@@ -90,7 +109,9 @@ impl<T> AssetExt for T where T: Asset {
         T::Category::get_file(asset_path, extension)
     }
     fn open_file(asset_path: &str, extension: &str) -> AssetResult<BufReader> {
-        Ok(BufReader::new(File::open(Self::get_file(asset_path, extension))?))
+        let file_path = Self::get_file(asset_path, extension);
+        log::trace!("Opening file {}", file_path.to_string_lossy());
+        Ok(BufReader::new(File::open(file_path)?))
     }
     fn read_ron<T1: DeserializeOwned>(asset_path: &str) -> AssetResult<T1> {
         let reader = Self::open_file(asset_path, "ron")?;
@@ -122,10 +143,18 @@ impl Resources {
     pub fn new() -> Resources {
         Self::default()
     }
-    pub fn get<T>(&mut self, asset_path: &str) -> &T where T: Asset<Category=category::Resource> + 'static {
+    pub fn get<T>(&mut self, asset_path: &str) -> &T where T: Asset<Category=category::Resource> + Default + 'static {
         if !self.resources.contains_key(asset_path) {
-            // TODO error handling
-            let asset = T::read(asset_path).expect("failed to load resource");
+            let asset = match T::read(asset_path) {
+                Ok(value) => {
+                    log::debug!("Loaded resource {}", asset_path);
+                    value
+                }
+                Err(error) => {
+                    log::error!("Failed to load resource {}: {}", asset_path, error);
+                    Default::default()
+                }
+            };
             self.resources.insert(asset_path.to_owned(), Box::new(asset));
         }
         
@@ -136,8 +165,10 @@ impl Resources {
     }
     pub fn insert<T>(&mut self, asset_path: &str, asset: T) where T: 'static {
         if self.resources.contains_key(asset_path) {
-            panic!("tried to create a resource that already exists");
+            log::warn!("Tried to create resource {} that already exists", asset_path);
+            return;
         }
+        log::debug!("Created resource {}", asset_path);
         self.resources.insert(asset_path.to_owned(), Box::new(asset));
     }
 }

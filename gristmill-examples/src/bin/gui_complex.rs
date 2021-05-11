@@ -94,18 +94,22 @@ impl<'a> AssetListLoader<'a> for GuiAssetLoader<'a> {
         }
     }
     fn load(&mut self, item: &AssetItem) {
-        let texture = match &item.asset_type as &str {
+        match &item.asset_type as &str {
             "" => {
-                let image = Image::read(&item.asset_path).unwrap();
-                self.gui_loader.load_image(&image)
+                if let Some(image) = Image::try_read(&item.asset_path) {
+                    let texture = self.gui_loader.load_image(&image);
+                    self.texture_list.insert(item.name.to_owned(), texture);
+                }
             },
             "nine_slice" => {
-                let image = NineSliceImage::read(&item.asset_path).unwrap();
-                self.gui_loader.load_nine_slice_image(&image)
+                if let Some(image) = NineSliceImage::try_read(&item.asset_path) {
+                    let texture = self.gui_loader.load_nine_slice_image(&image);
+                    self.texture_list.insert(item.name.to_owned(), texture);
+                }
             },
-            _ => panic!("unexpected asset type in list"),
-        };
-        self.texture_list.insert(item.name.to_owned(), texture);
+            _ => log::warn!("Invalid asset type \"{}\"", item.asset_type)
+        }
+        
     }
     fn finish(self) -> Self::Output {
         self.texture_list

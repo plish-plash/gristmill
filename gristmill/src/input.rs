@@ -289,6 +289,10 @@ pub struct InputBindings {
 
 impl_ron_asset!(InputBindings, Config);
 
+impl InputBindings {
+    pub fn len(&self) -> usize { self.bindings.len() }
+}
+
 pub struct InputSystem {
     bindings: InputBindings,
     event_system: event::EventSystem<InputEvent>,
