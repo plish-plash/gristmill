@@ -23,6 +23,7 @@ type TextConstants = text::PushConstants;
 
 #[derive(Clone)]
 pub enum GuiTexture {
+    Empty,
     Simple(Texture),
     NineSlice(NineSliceTexture),
 }
@@ -30,13 +31,30 @@ pub enum GuiTexture {
 impl GuiTexture {
     pub fn size(&self) -> Option<Size> {
         match self {
+            GuiTexture::Empty => None,
             GuiTexture::Simple(texture) => Some(texture.size()),
             GuiTexture::NineSlice(_) => None,
         }
     }
 }
 
-pub type GuiTextureList = HashMap<String, GuiTexture>;
+#[derive(Default)]
+pub struct GuiTextureList {
+    map: HashMap<String, GuiTexture>,
+}
+
+impl GuiTextureList {
+    pub fn new() -> GuiTextureList { GuiTextureList { map: HashMap::new() } }
+    pub fn get(&self, key: &str) -> GuiTexture {
+        self.map.get(key).cloned().unwrap_or_else(|| {
+            log::warn!("Texture {} not found in GuiTextureList", key);
+            GuiTexture::Empty
+        })
+    }
+    pub fn insert(&mut self, key: String, value: GuiTexture) {
+        self.map.insert(key, value);
+    }
+}
 
 pub struct DrawCommand {
     drawable: Drawable,
@@ -65,6 +83,7 @@ impl DrawCommand {
 
 #[derive(Clone)]
 pub enum Drawable {
+    None,
     TextureRect(Texture),
     TextureNineSlice(NineSliceTexture),
     Text(Arc<TextHandle>),
@@ -83,6 +102,9 @@ impl TextMetrics {
         let v_metrics = last_glyph.font().v_metrics(last_glyph.scale());
         TextMetrics { width, v_metrics }
     }
+    fn empty() -> TextMetrics {
+        TextMetrics { width: 0.0, v_metrics: rusttype::VMetrics { ascent: 0.0, descent: 0.0, line_gap: 0.0 } }
+    }
 
     pub fn width(&self) -> f32 { self.width }
     pub fn ascent(&self) -> f32 { self.v_metrics.ascent }
@@ -96,17 +118,24 @@ pub struct DrawContext<'a> {
 
 impl<'a> DrawContext<'a> {
     pub fn new_color_rect_drawable(&mut self) -> Drawable {
-        Drawable::TextureRect(self.render.white_1x1.clone())
+        self.new_texture_rect_drawable(GuiTexture::Empty)
     }
     pub fn new_texture_rect_drawable(&mut self, texture: GuiTexture) -> Drawable {
         match texture {
+            GuiTexture::Empty => Drawable::TextureRect(self.render.white_1x1.clone()),
             GuiTexture::Simple(tex) => Drawable::TextureRect(tex),
             GuiTexture::NineSlice(tex) => Drawable::TextureNineSlice(tex),
         }
     }
     pub fn new_text_drawable(&mut self, font: Font, size: f32, text: &str) -> (Drawable, TextMetrics) {
-        if text.is_empty() { panic!("TextDrawable requires a non-empty string"); }
-        let font_asset = fonts().get(font);
+        if text.is_empty() {
+            log::warn!("Can't create text Drawable with empty string");
+            return (Drawable::None, TextMetrics::empty());
+        }
+        let font_asset = match fonts().get(font) {
+            Some(font) => font,
+            None => return (Drawable::None, TextMetrics::empty()),
+        };
         let glyphs: Vec<PositionedGlyph> = font_asset.layout(text, Scale::uniform(size), point(0., 0.)).collect();
         let metrics = TextMetrics::new(&glyphs);
         let handle = self.render.text_pipeline.add_section(glyphs);
@@ -181,6 +210,7 @@ impl scene::SceneRenderer for GuiRenderer {
         let screen_dimensions = self.screen_dimensions.into();
         for draw_command in self.pending_draw_commands.drain(..) {
             match &draw_command.drawable {
+                Drawable::None => (),
                 Drawable::TextureRect(texture) => 
                     self.texture_rect_pipeline.draw_rect(context, texture, draw_command.texture_rect_constants(screen_dimensions)),
                 Drawable::TextureNineSlice(texture) =>

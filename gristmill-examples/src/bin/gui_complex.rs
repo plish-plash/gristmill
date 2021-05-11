@@ -128,7 +128,7 @@ impl PlayerWindow {
     // TODO inflate from file
     const PADDING: i32 = 8;
     fn build_top(gui: &mut Gui, parent: &BoxLayout, player_image: GuiTexture) -> (WidgetNode<Text>, WidgetNode<Text>) {
-        let image_size = player_image.size().unwrap();
+        let image_size = player_image.size().unwrap_or_default();
         let container = parent.add(gui, BoxSize::Exact(image_size.height));
 
         gui.add_widget(container, Layout::offset_parent(Rect::from_size(image_size)), Quad::new_texture(player_image));
@@ -176,15 +176,15 @@ impl PlayerWindow {
     }
     fn build(gui: &mut Gui, textures: &GuiTextureList) -> PlayerWindow {
         let mut base_button = ButtonClass::new();
-        base_button.set_texture(textures["button"].clone());
+        base_button.set_texture(textures.get("button"));
         let base_button = Arc::new(base_button);
 
         let layout = Layout::center_parent(Size::new(384, 256));
-        let root = gui.add_widget(gui.root(), layout, Quad::new_texture(textures["frame"].clone())).into();
+        let root = gui.add_widget(gui.root(), layout, Quad::new_texture(textures.get("frame"))).into();
         gui.set_event_handler(root);
         let root_layout = BoxLayout::new(root, BoxDirection::Vertical, Padding::new(PlayerWindow::PADDING));
 
-        let (name_text, level_text) = PlayerWindow::build_top(gui, &root_layout, textures["player"].clone());
+        let (name_text, level_text) = PlayerWindow::build_top(gui, &root_layout, textures.get("player"));
 
         root_layout.add_widget(gui, BoxSize::Exact(1), Quad::new_color(gristmill::color::black()));
         
@@ -196,9 +196,9 @@ impl PlayerWindow {
         
         gui.set_container(left_container, TableContainer::new(&[0, 24, 16, 16], 16, Padding::new_inside(PlayerWindow::PADDING), Some(1)));
         let mut add_button = ButtonClass::new_inherit(base_button.clone());
-        add_button.set_icon(textures["add"].clone());
+        add_button.set_icon(textures.get("add"));
         let mut sub_button = ButtonClass::new_inherit(base_button.clone());
-        sub_button.set_icon(textures["sub"].clone());
+        sub_button.set_icon(textures.get("sub"));
         let mut stat_unspent = PlayerWindow::build_stat_row(gui, left_container, "Remaining".to_string(), None);
         let stats = [
             PlayerWindow::build_stat_row(gui, left_container, "Strength".to_string(), Some((0, &mut stat_unspent, &add_button, &sub_button))),
@@ -206,8 +206,8 @@ impl PlayerWindow {
             PlayerWindow::build_stat_row(gui, left_container, "Intelligence".to_string(), Some((2, &mut stat_unspent, &add_button, &sub_button))),
         ];
 
-        let perk_texture = &textures["perk"];
-        let perk_texture_size = perk_texture.size().unwrap();
+        let perk_texture = textures.get("perk");
+        let perk_texture_size = perk_texture.size().unwrap_or_default();
         gui.set_container(right_container, FlowContainer::new(Padding::new_inside(PlayerWindow::PADDING)));
         for _i in 0..10 {
             gui.add_widget(right_container, Layout::new_size(perk_texture_size), Quad::new_texture(perk_texture.clone()));

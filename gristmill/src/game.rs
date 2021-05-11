@@ -77,8 +77,14 @@ pub trait Game: Sized + 'static {
 pub fn run_game<G: Game>(resources: Resources) -> ! {
     init_logging();
     log::info!("Starting up...");
-    let input_bindings = InputBindings::read("controls").unwrap();
-    log::debug!("Loaded {} input bindings", input_bindings.len());
+    let input_bindings = match InputBindings::read("controls") {
+        Ok(bindings) => bindings,
+        Err(error) => {
+            log::error!("Failed to load controls: {}", error);
+            std::process::exit(1);
+        }
+    };
+    log::debug!("Loaded controls ({} input bindings)", input_bindings.len());
     let (mut loader, event_loop) = RenderLoader::create_window();
     let (game, render_pass) = G::load(resources, &mut loader);
     log::info!("Setup finished, entering main loop");
