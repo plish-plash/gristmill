@@ -1,3 +1,4 @@
+use gristmill::asset::Resources;
 use gristmill::game::{Game, Window, run_game};
 use gristmill_gui::{Gui, WidgetNode, GuiInputActions, event::GuiActionEvent, quad::Quad, button::ButtonClass, text::Text, layout::*};
 use gristmill::renderer::{RenderLoader, RenderContext, pass::{RenderPass, RenderPass3D2D}};
@@ -42,7 +43,7 @@ struct GuiGame {
 
 impl Game for GuiGame {
     type RenderPass = RenderPass3D2D<BasicGeoRenderer, GuiRenderer>;
-    fn load(loader: &mut RenderLoader) -> (Self, Self::RenderPass) {
+    fn load(_resources: Resources, loader: &mut RenderLoader) -> (Self, Self::RenderPass) {
         let mut gui = Gui::new();
         gui.set_event_handler(gui.root());
 
@@ -98,6 +99,7 @@ impl Game for GuiGame {
 }
 
 fn main() {
-    gristmill_gui::font::load_fonts(vec!["fonts/DejaVuSans".to_string()]); // TODO fonts should be autoloaded
-    run_game::<GuiGame>();
+    let mut resources = Resources::new();
+    gristmill_gui::font::load_fonts(&mut resources);
+    run_game::<GuiGame>(resources);
 }

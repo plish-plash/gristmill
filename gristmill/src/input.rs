@@ -2,7 +2,7 @@ use winit::event::{Event, VirtualKeyCode, MouseButton, WindowEvent, DeviceEvent,
 use winit::dpi::PhysicalPosition;
 use serde::{Serialize, Deserialize};
 use crate::geometry2d::Point;
-use crate::asset::{RonAsset, AssetCategory};
+use crate::impl_ron_asset;
 use crate::event;
 
 // -------------------------------------------------------------------------------------------------
@@ -287,9 +287,7 @@ pub struct InputBindings {
     bindings: Vec<(String, BindingEnum)>,
 }
 
-impl RonAsset for InputBindings {
-    fn category() -> AssetCategory { AssetCategory::Config }
-}
+impl_ron_asset!(InputBindings, Config);
 
 pub struct InputSystem {
     bindings: InputBindings,

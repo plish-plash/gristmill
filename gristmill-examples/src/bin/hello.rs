@@ -1,3 +1,4 @@
+use gristmill::asset::Resources;
 use gristmill::game::{Game, Window, run_game};
 use gristmill::renderer::{RenderLoader, RenderContext, pass::{RenderPass, RenderPass3D}};
 use gristmill::input::InputSystem;
@@ -10,7 +11,7 @@ struct HelloGame;
 
 impl Game for HelloGame {
     type RenderPass = RenderPass3D<BasicGeoRenderer>;
-    fn load(loader: &mut RenderLoader) -> (Self, Self::RenderPass) {
+    fn load(_resources: Resources, loader: &mut RenderLoader) -> (Self, Self::RenderPass) {
         (HelloGame, RenderPass3D::new(loader))
     }
     fn update(&mut self, _window: &Window, _input_system: &mut InputSystem, _delta: f64) -> bool {
@@ -22,5 +23,5 @@ impl Game for HelloGame {
 }
 
 fn main() {
-    run_game::<HelloGame>();
+    run_game::<HelloGame>(Resources::new());
 }

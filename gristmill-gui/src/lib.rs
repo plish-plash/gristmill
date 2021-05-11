@@ -24,7 +24,7 @@ use event::{GuiActionEvent, GuiActionEventSystem, GuiNavigationEvent, GuiNavigat
 pub use container::Container;
 pub use listener::GuiValue;
 pub use event::{GuiEventSystem, GuiInputEvent};
-pub use renderer::{DrawContext, Drawable, GuiTexture, TextMetrics};
+pub use renderer::{DrawContext, Drawable, GuiTexture, GuiTextureList, TextMetrics};
 
 #[macro_export]
 macro_rules! impl_class_field_fn {

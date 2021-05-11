@@ -1,7 +1,6 @@
 use std::sync::Once;
-use std::path::{Path, PathBuf};
 
-use gristmill::asset::{Asset, AssetCategory, AssetResult, AssetError, load_asset};
+use gristmill::asset::{Asset, AssetExt, AssetResult, AssetError, category, Resources, resource::AssetList};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -19,19 +18,44 @@ pub fn fonts() -> &'static FontStore {
     }
 }
 
-pub fn load_fonts(asset_paths: Vec<String>) {
+pub fn load_fonts(resources: &mut Resources) {
     FONTS_INIT.call_once(|| {
         // TODO error handling
-        let fonts: Vec<FontAsset> = asset_paths.iter().map(|path|
-            load_asset(path)
-        ).collect::<Result<_, _>>().unwrap();
+        let asset_list = AssetList::read("fonts").unwrap();
+        if asset_list.loader() != "font" {
+            panic!("invalid loader for font list");
+        }
+        let mut font_store = FontStore { fonts: Vec::new() };
+        let mut font_list = FontList { names: Vec::new() };
+        for item in asset_list {
+            if item.asset_type != "font" {
+                panic!("unexpected asset type in font list");
+            }
+            font_store.fonts.push(FontAsset::read(&item.asset_path).unwrap());
+            font_list.names.push(item.name);
+        }
+        resources.insert("fonts", font_list);
         unsafe {
-            FONTS = Some(FontStore::new(fonts));
+            FONTS = Some(font_store);
         }
     });
 }
 
 // -------------------------------------------------------------------------------------------------
+
+struct FontAsset(rusttype::Font<'static>);
+
+impl Asset for FontAsset {
+    type Category = category::Data;
+    fn read(asset_path: &str) -> AssetResult<Self> {
+        let file_path = Self::get_file(asset_path, "ttf");
+        let font = match rusttype::Font::try_from_vec(std::fs::read(&file_path)?) {
+            Some(f) => f,
+            None => return Err(AssetError::InvalidData),
+        };
+        Ok(FontAsset(font))
+    }
+}
 
 #[derive(Copy, Clone, Default, Eq, PartialEq, Debug)]
 pub struct Font(usize);
@@ -41,49 +65,18 @@ pub struct FontStore {
 }
 
 impl FontStore {
-    fn new(fonts: Vec<FontAsset>) -> FontStore {
-        FontStore { fonts }
-    }
-
     pub fn get(&self, index: Font) -> &rusttype::Font<'static> {
-        &self.fonts[index.0].font
-    }
-    pub fn find_by_name(&self, name: &str) -> Option<Font> {
-        for (index, font) in self.fonts.iter().enumerate() {
-            if font.name == name {
-                return Some(Font(index));
-            }
-        }
-        None
-    }
-    pub fn find_by_path(&self, path: &Path) -> Option<Font> {
-        for (index, font) in self.fonts.iter().enumerate() {
-            if font.file_path == path {
-                return Some(Font(index));
-            }
-        }
-        None
+        &self.fonts[index.0].0
     }
 }
 
-struct FontAsset {
-    font: rusttype::Font<'static>,
-    name: String,
-    file_path: PathBuf,
+pub struct FontList {
+    names: Vec<String>,
 }
 
-impl Asset for FontAsset {
-    fn category() -> AssetCategory { AssetCategory::Asset }
-    fn file_extension() -> &'static str { "ttf" }
-    fn load(file_path: PathBuf) -> AssetResult<Self> {
-        let font = match rusttype::Font::try_from_vec(std::fs::read(&file_path)?) {
-            Some(f) => f,
-            None => return Err(AssetError::new_data()),
-        };
-        Ok(FontAsset {
-            font,
-            name: file_path.file_stem().unwrap().to_string_lossy().into_owned(),
-            file_path,
-        })
+impl FontList {
+    pub fn find(&self, name: &str) -> Font {
+        let index = self.names.iter().position(|n| n == name);
+        Font(index.expect("unknown font"))
     }
 }

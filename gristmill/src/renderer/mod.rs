@@ -28,10 +28,12 @@ use winit::{
 };
 use vulkano_win::VkSurfaceBuild;
 
+use crate::asset::resource::AssetList;
 use super::game::{Game, GameLoop};
 use super::input::InputSystem;
 
 use swapchain::Swapchain;
+use loader::AssetListLoader;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -40,6 +42,7 @@ pub type RenderPassArc = Arc<dyn vulkano::framebuffer::RenderPassAbstract + Send
 pub type PipelineArc = Arc<dyn vulkano::pipeline::GraphicsPipelineAbstract + Send + Sync>;
 
 pub use pass::RenderPass;
+pub use scene::SceneRenderer;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -125,6 +128,18 @@ impl RenderLoader {
             context: self.load_context(render_pass, subpass_id),
             inner: subpass,
         }
+    }
+
+    pub fn load_assets<'a, L>(&'a mut self, render_pass: &'a mut L::RenderPass, asset_list: &AssetList) -> L::Output where L: AssetListLoader<'a> {
+        // TODO error handling... as usual
+        if asset_list.loader() != L::name() {
+            panic!("AssetList loader is the wrong type");
+        }
+        let mut list = L::new(self, render_pass);
+        for item in asset_list.iter() {
+            list.load(item);
+        }
+        list.finish()
     }
 
     fn now_future(&self) -> Option<Box<dyn GpuFuture>> {

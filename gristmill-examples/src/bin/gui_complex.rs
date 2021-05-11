@@ -1,10 +1,9 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
-use gristmill::asset::{load_asset, image::{Image, NineSliceImage}};
+use gristmill::asset::{Asset, Resources, image::{Image, NineSliceImage}, resource::AssetItem};
 use gristmill::game::{Game, Window, run_game};
 use gristmill_gui::{*, quad::Quad, text::{Text, Align}, button::ButtonClass, event::{GuiActionEvent, GuiActionEventRef}, container::*, layout::*, layout_builder::*, listener};
-use gristmill::renderer::{RenderLoader, LoadRef, RenderContext, pass::{RenderPass, RenderPass3D2D}};
+use gristmill::renderer::{RenderLoader, LoadRef, RenderContext, pass::{RenderPass, RenderPass3D2D}, loader::AssetListLoader};
 use gristmill::color::Color;
 use gristmill::geometry2d::*;
 use gristmill::input::{InputSystem, InputActions, CursorAction, ActionState};
@@ -79,30 +78,37 @@ impl Player {
     }
 }
 
-struct GuiAssetList {
-    textures: HashMap<String, GuiTexture>
+struct GuiAssetLoader<'a> {
+    gui_loader: LoadRef<'a, GuiRenderer>,
+    texture_list: GuiTextureList,
 }
 
-impl GuiAssetList {
-    pub fn get_texture(&self, name: &str) -> GuiTexture {
-        self.textures.get(name).expect("texture not found").clone()
+impl<'a> AssetListLoader<'a> for GuiAssetLoader<'a> {
+    type RenderPass = <GuiGame as Game>::RenderPass;
+    type Output = GuiTextureList;
+    fn name() -> &'static str { "gui" }
+    fn new(loader: &'a mut RenderLoader, render_pass: &'a mut Self::RenderPass) -> Self {
+        GuiAssetLoader {
+            gui_loader: render_pass.scene_render1(loader),
+            texture_list: GuiTextureList::new(),
+        }
     }
-    pub fn load(mut gui_loader: LoadRef<GuiRenderer>) -> GuiAssetList {
-        let mut list = GuiAssetList { textures: HashMap::new() };
-
-        let frame_image: NineSliceImage = load_asset("images/FrameSquare").unwrap();
-        list.textures.insert("frame".to_string(), gui_loader.load_nine_slice_image(&frame_image));
-        let button_image: NineSliceImage = load_asset("images/FrameRounded").unwrap();
-        list.textures.insert("button".to_string(), gui_loader.load_nine_slice_image(&button_image));
-        let player_image: Image = load_asset("images/Portrait").unwrap();
-        list.textures.insert("player".to_string(), gui_loader.load_image(&player_image));
-        let perk_image: Image = load_asset("images/Perk1").unwrap();
-        list.textures.insert("perk".to_string(), gui_loader.load_image(&perk_image));
-        let add_image: Image = load_asset("images/Add").unwrap();
-        list.textures.insert("add".to_string(), gui_loader.load_image(&add_image));
-        let sub_image: Image = load_asset("images/Subtract").unwrap();
-        list.textures.insert("sub".to_string(), gui_loader.load_image(&sub_image));
-        list
+    fn load(&mut self, item: &AssetItem) {
+        let texture = match &item.asset_type as &str {
+            "" => {
+                let image = Image::read(&item.asset_path).unwrap();
+                self.gui_loader.load_image(&image)
+            },
+            "nine_slice" => {
+                let image = NineSliceImage::read(&item.asset_path).unwrap();
+                self.gui_loader.load_nine_slice_image(&image)
+            },
+            _ => panic!("unexpected asset type in list"),
+        };
+        self.texture_list.insert(item.name.to_owned(), texture);
+    }
+    fn finish(self) -> Self::Output {
+        self.texture_list
     }
 }
 
@@ -164,17 +170,17 @@ impl PlayerWindow {
     
         stat_value
     }
-    fn build(gui: &mut Gui, asset_list: &GuiAssetList) -> PlayerWindow {
+    fn build(gui: &mut Gui, textures: &GuiTextureList) -> PlayerWindow {
         let mut base_button = ButtonClass::new();
-        base_button.set_texture(asset_list.get_texture("button"));
+        base_button.set_texture(textures["button"].clone());
         let base_button = Arc::new(base_button);
 
         let layout = Layout::center_parent(Size::new(384, 256));
-        let root = gui.add_widget(gui.root(), layout, Quad::new_texture(asset_list.get_texture("frame"))).into();
+        let root = gui.add_widget(gui.root(), layout, Quad::new_texture(textures["frame"].clone())).into();
         gui.set_event_handler(root);
         let root_layout = BoxLayout::new(root, BoxDirection::Vertical, Padding::new(PlayerWindow::PADDING));
 
-        let (name_text, level_text) = PlayerWindow::build_top(gui, &root_layout, asset_list.get_texture("player"));
+        let (name_text, level_text) = PlayerWindow::build_top(gui, &root_layout, textures["player"].clone());
 
         root_layout.add_widget(gui, BoxSize::Exact(1), Quad::new_color(gristmill::color::black()));
         
@@ -186,9 +192,9 @@ impl PlayerWindow {
         
         gui.set_container(left_container, TableContainer::new(&[0, 24, 16, 16], 16, Padding::new_inside(PlayerWindow::PADDING), Some(1)));
         let mut add_button = ButtonClass::new_inherit(base_button.clone());
-        add_button.set_icon(asset_list.get_texture("add"));
+        add_button.set_icon(textures["add"].clone());
         let mut sub_button = ButtonClass::new_inherit(base_button.clone());
-        sub_button.set_icon(asset_list.get_texture("sub"));
+        sub_button.set_icon(textures["sub"].clone());
         let mut stat_unspent = PlayerWindow::build_stat_row(gui, left_container, "Remaining".to_string(), None);
         let stats = [
             PlayerWindow::build_stat_row(gui, left_container, "Strength".to_string(), Some((0, &mut stat_unspent, &add_button, &sub_button))),
@@ -196,7 +202,7 @@ impl PlayerWindow {
             PlayerWindow::build_stat_row(gui, left_container, "Intelligence".to_string(), Some((2, &mut stat_unspent, &add_button, &sub_button))),
         ];
 
-        let perk_texture = asset_list.get_texture("perk");
+        let perk_texture = &textures["perk"];
         let perk_texture_size = perk_texture.size().unwrap();
         gui.set_container(right_container, FlowContainer::new(Padding::new_inside(PlayerWindow::PADDING)));
         for _i in 0..10 {
@@ -250,12 +256,12 @@ impl PlayerWindow {
 
 impl Game for GuiGame {
     type RenderPass = RenderPass3D2D<BasicGeoRenderer, GuiRenderer>;
-    fn load(loader: &mut RenderLoader) -> (Self, Self::RenderPass) {
+    fn load(mut resources: Resources, loader: &mut RenderLoader) -> (Self, Self::RenderPass) {
         let mut render_pass = Self::RenderPass::with_clear_color(loader, Color::new(0.0, 0.8, 0.8, 1.0));
-        let asset_list = GuiAssetList::load(render_pass.scene_render1(loader));
+        let textures = loader.load_assets::<GuiAssetLoader>(&mut render_pass, resources.get("gui_textures"));
 
         let mut gui = Gui::new();
-        let mut player_window = PlayerWindow::build(&mut gui, &asset_list);
+        let mut player_window = PlayerWindow::build(&mut gui, &textures);
 
         let player = Player::new();
         player_window.show(&mut gui, &player);
@@ -282,6 +288,7 @@ impl Game for GuiGame {
 }
 
 fn main() {
-    gristmill_gui::font::load_fonts(vec!["fonts/DejaVuSans".to_string()]); // TODO fonts should be autoloaded
-    run_game::<GuiGame>();
+    let mut resources = Resources::new();
+    gristmill_gui::font::load_fonts(&mut resources);
+    run_game::<GuiGame>(resources);
 }

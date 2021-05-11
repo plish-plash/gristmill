@@ -2,6 +2,7 @@ mod text;
 mod texture_rect;
 
 use std::sync::Arc;
+use std::collections::HashMap;
 
 use vulkano::command_buffer::{AutoCommandBufferBuilder, SubpassContents};
 use vulkano::sampler::Filter;
@@ -34,6 +35,8 @@ impl GuiTexture {
         }
     }
 }
+
+pub type GuiTextureList = HashMap<String, GuiTexture>;
 
 pub struct DrawCommand {
     drawable: Drawable,

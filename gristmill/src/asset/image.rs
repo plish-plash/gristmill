@@ -1,15 +1,9 @@
-use std::io;
-use std::fs::File;
-use std::path::PathBuf;
-
 use serde::Deserialize;
 
 use crate::geometry2d::*;
-use super::{Asset, SimpleAsset, AssetCategory, AssetResult, AssetError};
+use super::{Asset, AssetExt, AssetResult, AssetError, category};
 
 // -------------------------------------------------------------------------------------------------
-
-type BufReader = io::BufReader<File>;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum ImageFormat {
@@ -20,12 +14,12 @@ pub enum ImageFormat {
 impl ImageFormat {
     fn from(color_type: png::ColorType, bit_depth: png::BitDepth) -> AssetResult<ImageFormat> {
         if bit_depth != png::BitDepth::Eight {
-            return Err(AssetError::new_format(format!("invalid bit depth: {:?}", bit_depth)));
+            return Err(AssetError::InvalidFormat(format!("invalid bit depth: {:?}", bit_depth)));
         }
         match color_type {
             png::ColorType::RGB => Ok(ImageFormat::RGB24),
             png::ColorType::RGBA => Ok(ImageFormat::RGBA32),
-            _ => Err(AssetError::new_format(format!("invalid color type: {:?}", color_type))),
+            _ => Err(AssetError::InvalidFormat(format!("invalid color type: {:?}", color_type))),
         }
     }
 }
@@ -59,11 +53,10 @@ impl Image {
     }
 }
 
-impl SimpleAsset for Image {
-    fn category() -> AssetCategory { AssetCategory::Asset }
-    fn file_extension() -> &'static str { "png" }
-    fn load(reader: BufReader) -> AssetResult<Self> {
-        let decoder = png::Decoder::new(reader);
+impl Asset for Image {
+    type Category = category::Data;
+    fn read(asset_path: &str) -> AssetResult<Self> {
+        let decoder = png::Decoder::new(Self::open_file(asset_path, "png")?);
         let (info, mut reader) = decoder.read_info().unwrap();
         let format = ImageFormat::from(info.color_type, info.bit_depth)?;
         let mut buffer = vec![0; info.buffer_size()];
@@ -90,13 +83,10 @@ impl NineSliceImage {
 }
 
 impl Asset for NineSliceImage {
-    fn category() -> AssetCategory { AssetCategory::Asset }
-    fn file_extension() -> &'static str { "ron" }
-    fn load(mut file_path: PathBuf) -> AssetResult<Self> {
-        let reader = BufReader::new(File::open(&file_path)?);
-        let slices = ron::de::from_reader(reader).map_err(|err| AssetError::new_format(err.to_string()))?;
-        file_path.set_extension(<Image as Asset>::file_extension());
-        let image = <Image as Asset>::load(file_path)?;
+    type Category = category::Data;
+    fn read(asset_path: &str) -> AssetResult<Self> {
+        let slices = Self::read_ron(asset_path)?;
+        let image = Image::read(asset_path)?;
         Ok(NineSliceImage { image, slices })
     }
 }
@@ -124,13 +114,10 @@ impl TileAtlasImage {
 }
 
 impl Asset for TileAtlasImage {
-    fn category() -> AssetCategory { AssetCategory::Asset }
-    fn file_extension() -> &'static str { "ron" }
-    fn load(mut file_path: PathBuf) -> AssetResult<Self> {
-        let reader = BufReader::new(File::open(&file_path)?);
-        let info = ron::de::from_reader(reader).map_err(|err| AssetError::new_format(err.to_string()))?;
-        file_path.set_extension(<Image as Asset>::file_extension());
-        let image = <Image as Asset>::load(file_path)?;
+    type Category = category::Data;
+    fn read(asset_path: &str) -> AssetResult<Self> {
+        let info = Self::read_ron(asset_path)?;
+        let image = Image::read(asset_path)?;
         Ok(TileAtlasImage { image, info })
     }
 }
