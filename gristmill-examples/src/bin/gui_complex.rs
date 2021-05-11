@@ -1,15 +1,15 @@
 use std::sync::Arc;
 
-use gristmill::asset::{Asset, Resources, image::{Image, NineSliceImage}, resource::AssetItem};
+use gristmill::asset::Resources;
 use gristmill::game::{Game, Window, run_game};
 use gristmill_gui::{*, quad::Quad, text::{Text, Align}, button::ButtonClass, event::{GuiActionEvent, GuiActionEventRef}, container::*, layout::*, layout_builder::*, listener};
-use gristmill::renderer::{RenderLoader, LoadRef, RenderContext, pass::{RenderPass, RenderPass3D2D}, loader::AssetListLoader};
+use gristmill::renderer::{RenderLoader, RenderContext, RenderAssetList, pass::{RenderPass, RenderPass3D2D}};
 use gristmill::color::Color;
 use gristmill::geometry2d::*;
 use gristmill::input::{InputSystem, InputActions, CursorAction, ActionState};
 
 use gristmill_examples::basic_geo_renderer::BasicGeoRenderer;
-use gristmill_gui::renderer::{GuiRenderer, GuiRendererLoad};
+use gristmill_gui::renderer::GuiRenderer;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -78,44 +78,6 @@ impl Player {
     }
 }
 
-struct GuiAssetLoader<'a> {
-    gui_loader: LoadRef<'a, GuiRenderer>,
-    texture_list: GuiTextureList,
-}
-
-impl<'a> AssetListLoader<'a> for GuiAssetLoader<'a> {
-    type RenderPass = <GuiGame as Game>::RenderPass;
-    type Output = GuiTextureList;
-    fn name() -> &'static str { "gui" }
-    fn new(loader: &'a mut RenderLoader, render_pass: &'a mut Self::RenderPass) -> Self {
-        GuiAssetLoader {
-            gui_loader: render_pass.scene_render1(loader),
-            texture_list: GuiTextureList::new(),
-        }
-    }
-    fn load(&mut self, item: &AssetItem) {
-        match &item.asset_type as &str {
-            "" => {
-                if let Some(image) = Image::try_read(&item.asset_path) {
-                    let texture = self.gui_loader.load_image(&image);
-                    self.texture_list.insert(item.name.to_owned(), texture);
-                }
-            },
-            "nine_slice" => {
-                if let Some(image) = NineSliceImage::try_read(&item.asset_path) {
-                    let texture = self.gui_loader.load_nine_slice_image(&image);
-                    self.texture_list.insert(item.name.to_owned(), texture);
-                }
-            },
-            _ => log::warn!("Invalid asset type \"{}\"", item.asset_type)
-        }
-        
-    }
-    fn finish(self) -> Self::Output {
-        self.texture_list
-    }
-}
-
 struct PlayerWindow {
     root: GuiNode,
     name_text: WidgetNode<Text>,
@@ -174,7 +136,7 @@ impl PlayerWindow {
     
         stat_value
     }
-    fn build(gui: &mut Gui, textures: &GuiTextureList) -> PlayerWindow {
+    fn build(gui: &mut Gui, textures: &RenderAssetList<GuiTexture>) -> PlayerWindow {
         let mut base_button = ButtonClass::new();
         base_button.set_texture(textures.get("button"));
         let base_button = Arc::new(base_button);
@@ -262,7 +224,7 @@ impl Game for GuiGame {
     type RenderPass = RenderPass3D2D<BasicGeoRenderer, GuiRenderer>;
     fn load(mut resources: Resources, loader: &mut RenderLoader) -> (Self, Self::RenderPass) {
         let mut render_pass = Self::RenderPass::with_clear_color(loader, Color::new(0.0, 0.8, 0.8, 1.0));
-        let textures = loader.load_assets::<GuiAssetLoader>(&mut render_pass, resources.get("gui_textures"));
+        let textures = render_pass.scene_render1(loader).load_assets(resources.get("gui_textures"));
 
         let mut gui = Gui::new();
         let mut player_window = PlayerWindow::build(&mut gui, &textures);

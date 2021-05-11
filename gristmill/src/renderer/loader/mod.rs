@@ -1,13 +1,9 @@
 pub mod texture;
 
-use crate::asset::resource::AssetItem;
-use crate::renderer::{RenderLoader, RenderPass};
+use crate::renderer::{RenderAsset, LoadContext};
 
-pub trait AssetListLoader<'a> {
-    type RenderPass: RenderPass + 'a;
-    type Output: Default;
+pub trait RenderAssetLoader {
+    type RenderAsset: RenderAsset;
     fn name() -> &'static str;
-    fn new(loader: &'a mut RenderLoader, render_pass: &'a mut Self::RenderPass) -> Self;
-    fn load(&mut self, item: &AssetItem);
-    fn finish(self) -> Self::Output;
+    fn load(&mut self, context: &mut LoadContext, asset_type: &str, asset_path: &str) -> Option<Self::RenderAsset>;
 }

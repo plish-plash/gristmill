@@ -2,16 +2,16 @@ mod text;
 mod texture_rect;
 
 use std::sync::Arc;
-use std::collections::HashMap;
 
 use vulkano::command_buffer::{AutoCommandBufferBuilder, SubpassContents};
 use vulkano::sampler::Filter;
 
 use rusttype::{PositionedGlyph, Scale, point};
 
-use gristmill::asset::image::{Image, NineSliceImage};
+use gristmill::asset::{Asset, image::{Image, NineSliceImage}};
 use gristmill::color::{Color, encode_color};
-use gristmill::renderer::{LoadContext, LoadRef, RenderContext, scene};
+use gristmill::renderer::{RenderAsset, LoadContext, RenderContext, scene};
+use gristmill::renderer::loader::RenderAssetLoader;
 use gristmill::geometry2d::{Rect, Size};
 use super::{Gui, font::{Font, fonts}};
 
@@ -23,7 +23,7 @@ type TextConstants = text::PushConstants;
 
 #[derive(Clone)]
 pub enum GuiTexture {
-    Empty,
+    None,
     Simple(Texture),
     NineSlice(NineSliceTexture),
 }
@@ -31,29 +31,16 @@ pub enum GuiTexture {
 impl GuiTexture {
     pub fn size(&self) -> Option<Size> {
         match self {
-            GuiTexture::Empty => None,
+            GuiTexture::None => None,
             GuiTexture::Simple(texture) => Some(texture.size()),
             GuiTexture::NineSlice(_) => None,
         }
     }
 }
 
-#[derive(Default)]
-pub struct GuiTextureList {
-    map: HashMap<String, GuiTexture>,
-}
-
-impl GuiTextureList {
-    pub fn new() -> GuiTextureList { GuiTextureList { map: HashMap::new() } }
-    pub fn get(&self, key: &str) -> GuiTexture {
-        self.map.get(key).cloned().unwrap_or_else(|| {
-            log::warn!("Texture {} not found in GuiTextureList", key);
-            GuiTexture::Empty
-        })
-    }
-    pub fn insert(&mut self, key: String, value: GuiTexture) {
-        self.map.insert(key, value);
-    }
+impl RenderAsset for GuiTexture {
+    fn type_name() -> &'static str { "GuiTexture" }
+    fn none() -> Self { GuiTexture::None }
 }
 
 pub struct DrawCommand {
@@ -118,11 +105,11 @@ pub struct DrawContext<'a> {
 
 impl<'a> DrawContext<'a> {
     pub fn new_color_rect_drawable(&mut self) -> Drawable {
-        self.new_texture_rect_drawable(GuiTexture::Empty)
+        self.new_texture_rect_drawable(GuiTexture::None)
     }
     pub fn new_texture_rect_drawable(&mut self, texture: GuiTexture) -> Drawable {
         match texture {
-            GuiTexture::Empty => Drawable::TextureRect(self.render.white_1x1.clone()),
+            GuiTexture::None => Drawable::TextureRect(self.render.white_1x1.clone()),
             GuiTexture::Simple(tex) => Drawable::TextureRect(tex),
             GuiTexture::NineSlice(tex) => Drawable::TextureNineSlice(tex),
         }
@@ -176,6 +163,13 @@ impl GuiRenderer {
         self.pending_draw_commands.clear();
         DrawContext { render: self, text_changed: false }
     }
+
+    pub fn load_image(&mut self, context: &mut LoadContext, image: &Image) -> GuiTexture {
+        GuiTexture::Simple(self.texture_rect_pipeline.load_image(context, image, Filter::Linear))
+    }
+    pub fn load_nine_slice_image(&mut self, context: &mut LoadContext, image: &NineSliceImage) -> GuiTexture {
+        GuiTexture::NineSlice(self.texture_rect_pipeline.load_nine_slice_image(context, image))
+    }
 }
 
 impl scene::SceneRenderer for GuiRenderer {
@@ -222,16 +216,22 @@ impl scene::SceneRenderer for GuiRenderer {
     }
 }
 
-pub trait GuiRendererLoad {
-    fn load_image(&mut self, image: &Image) -> GuiTexture;
-    fn load_nine_slice_image(&mut self, image: &NineSliceImage) -> GuiTexture;
-}
-
-impl<'a> GuiRendererLoad for LoadRef<'a, GuiRenderer> {
-    fn load_image(&mut self, image: &Image) -> GuiTexture {
-        GuiTexture::Simple(self.inner.texture_rect_pipeline.load_image(&mut self.context, image, Filter::Linear))
-    }
-    fn load_nine_slice_image(&mut self, image: &NineSliceImage) -> GuiTexture {
-        GuiTexture::NineSlice(self.inner.texture_rect_pipeline.load_nine_slice_image(&mut self.context, image))
+impl RenderAssetLoader for GuiRenderer {
+    type RenderAsset = GuiTexture;
+    fn name() -> &'static str { "gui" }
+    fn load(&mut self, context: &mut LoadContext, asset_type: &str, asset_path: &str) -> Option<Self::RenderAsset> {
+        match asset_type {
+            "" => {
+                Image::try_read(asset_path).map(|image| self.load_image(context, &image))
+            }
+            "nine_slice" => {
+                NineSliceImage::try_read(asset_path).map(|image| self.load_nine_slice_image(context, &image))
+            }
+            _ => {
+                log::warn!("Invalid asset type \"{}\" for loader {}", asset_type, Self::name());
+                None
+            }
+        }
+        
     }
 }

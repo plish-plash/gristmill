@@ -6,6 +6,7 @@ mod swapchain;
 // -------------------------------------------------------------------------------------------------
 
 use std::sync::Arc;
+use std::collections::HashMap;
 
 use vulkano::command_buffer::{AutoCommandBufferBuilder, DynamicState};
 use vulkano::device::{Device, DeviceExtensions, Queue};
@@ -33,7 +34,7 @@ use super::game::{Game, GameLoop};
 use super::input::InputSystem;
 
 use swapchain::Swapchain;
-use loader::AssetListLoader;
+use loader::RenderAssetLoader;
 
 // -------------------------------------------------------------------------------------------------
 
@@ -43,6 +44,32 @@ pub type PipelineArc = Arc<dyn vulkano::pipeline::GraphicsPipelineAbstract + Sen
 
 pub use pass::RenderPass;
 pub use scene::SceneRenderer;
+
+// -------------------------------------------------------------------------------------------------
+
+pub trait RenderAsset: Clone {
+    fn type_name() -> &'static str;
+    fn none() -> Self;
+}
+
+pub struct RenderAssetList<T: RenderAsset> {
+    name: String,
+    map: HashMap<String, T>,
+}
+
+impl<T: RenderAsset> RenderAssetList<T> {
+    fn new(name: String) -> RenderAssetList<T> { RenderAssetList { name, map: HashMap::new() } }
+    pub fn name(&self) -> &str { &self.name }
+    pub fn get(&self, key: &str) -> T {
+        self.map.get(key).map(|a| a.clone()).unwrap_or_else(|| {
+            log::warn!("{} {} not found in {} list", T::type_name(), key, self.name);
+            T::none()
+        })
+    }
+    pub fn insert(&mut self, key: String, value: T) {
+        self.map.insert(key, value);
+    }
+}
 
 // -------------------------------------------------------------------------------------------------
 
@@ -70,6 +97,29 @@ impl<'a> LoadContext<'a> {
 pub struct LoadRef<'a, T> {
     pub context: LoadContext<'a>,
     pub inner: &'a mut T,
+}
+
+impl<'a, T> LoadRef<'a, T> where T: RenderAssetLoader {
+    pub fn load_asset(&mut self, asset_type: &str, asset_path: &str) -> Option<T::RenderAsset> {
+        self.inner.load(&mut self.context, asset_type, asset_path)
+    }
+    pub fn load_assets(&mut self, asset_list: &AssetList) -> RenderAssetList<T::RenderAsset> {
+        let mut list = RenderAssetList::new(asset_list.name().to_owned());
+        if asset_list.loader().is_empty() {
+            return list;
+        }
+        if asset_list.loader() != T::name() {
+            log::error!("Invalid loader for {} list (expected \"{}\", got \"{}\")", asset_list.name(), T::name(), asset_list.loader());
+            return list;
+        }
+        for item in asset_list.iter() {
+            if let Some(asset) = self.load_asset(&item.asset_type, &item.asset_path) {
+                list.insert(item.name.to_owned(), asset);
+            }
+        }
+        log::debug!("Renderer loaded {} list", list.name());
+        list
+    }
 }
 
 pub struct RenderContext<'a> {
@@ -128,22 +178,6 @@ impl RenderLoader {
             context: self.load_context(render_pass, subpass_id),
             inner: subpass,
         }
-    }
-
-    pub fn load_assets<'a, L>(&'a mut self, render_pass: &'a mut L::RenderPass, asset_list: &AssetList) -> L::Output where L: AssetListLoader<'a> {
-        if asset_list.loader().is_empty() {
-            return Default::default();
-        }
-        if asset_list.loader() != L::name() {
-            log::error!("Invalid loader for asset list {} (expected \"{}\", got \"{}\")", asset_list.name(), L::name(), asset_list.loader());
-            return Default::default();
-        }
-        let mut list = L::new(self, render_pass);
-        for item in asset_list.iter() {
-            list.load(item);
-        }
-        log::debug!("Renderer loaded asset list {}", asset_list.name());
-        list.finish()
     }
 
     fn now_future(&self) -> Option<Box<dyn GpuFuture>> {
