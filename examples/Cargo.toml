@@ -1,0 +1,15 @@
+[package]
+name = "examples"
+version = "0.1.0"
+authors = ["plash <plishhplashh@gmail.com>"]
+edition = "2021"
+publish = false
+
+[dependencies]
+gristmill = { path = "../gristmill" }
+gristmill-gui = { path = "../gristmill-gui" }
+log = "0.4"
+
+vulkano = "0.32"
+vulkano-shaders = "0.32"
+bytemuck = "1.12"

@@ -1,8 +1,7 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use serde::{Serialize, Deserialize};
-
-use super::{Asset, AssetExt, AssetResult, category};
+use crate::asset::{category, Asset, AssetExt, AssetResult};
 use crate::impl_ron_asset;
 
 // -------------------------------------------------------------------------------------------------
@@ -23,7 +22,11 @@ pub struct AssetItem {
 
 impl From<(String, String, String)> for AssetItem {
     fn from((name, asset_type, asset_path): (String, String, String)) -> Self {
-        AssetItem { name, asset_type, asset_path }
+        AssetItem {
+            name,
+            asset_type,
+            asset_path,
+        }
     }
 }
 
@@ -45,9 +48,15 @@ impl Asset for AssetList {
 }
 
 impl AssetList {
-    pub fn name(&self) -> &str { &self.name }
-    pub fn loader(&self) -> &str { &self.loader }
-    pub fn iter(&self) -> std::slice::Iter<AssetItem> { self.assets.iter() }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn loader(&self) -> &str {
+        &self.loader
+    }
+    pub fn iter(&self) -> std::slice::Iter<AssetItem> {
+        self.assets.iter()
+    }
 }
 
 impl IntoIterator for AssetList {

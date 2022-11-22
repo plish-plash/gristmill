@@ -1,11 +1,19 @@
 pub mod asset;
-pub mod color;
 pub mod event;
-pub mod game;
-pub mod geometry2d;
+mod game;
+pub mod geom2d;
 pub mod input;
-pub mod renderer;
-pub mod util;
+mod object;
+pub mod render;
+
+pub use downcast_rs::*;
+pub use game::*;
+pub use glam as math;
+pub use object::*;
+pub use palette as color;
+pub use pareen as tween;
+
+pub type Color = color::LinSrgba;
 
 pub fn init_logging() {
     use env_logger::*;
@@ -15,5 +23,6 @@ pub fn init_logging() {
         "info"
     };
     Builder::from_env(Env::default().default_filter_or(default_log_level))
-        .try_init().ok();
+        .try_init()
+        .ok();
 }

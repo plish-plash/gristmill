@@ -1,13 +1,8 @@
 pub mod image;
 pub mod resource;
 
-use std::any::Any;
-use std::collections::HashMap;
-use std::{fmt, io};
-use std::fs::File;
-use std::path::PathBuf;
-
 use serde::de::DeserializeOwned;
+use std::{any::Any, collections::HashMap, fmt, fs::File, io, path::PathBuf};
 
 // -------------------------------------------------------------------------------------------------
 
@@ -20,7 +15,7 @@ fn asset_base_path() -> PathBuf {
 // Release: always look for assets relative to the executable
 #[cfg(not(debug_assertions))]
 fn asset_base_path() -> PathBuf {
-    // TODO cache
+    // TODO cache this
     let mut dir = env::current_exe().unwrap();
     dir.pop();
     dir
@@ -72,15 +67,21 @@ pub mod category {
     use super::AssetCategory;
     pub struct Config;
     impl AssetCategory for Config {
-        fn file_prefix() -> &'static str { "config" }
+        fn file_prefix() -> &'static str {
+            "config"
+        }
     }
     pub struct Data;
     impl AssetCategory for Data {
-        fn file_prefix() -> &'static str { "assets" }
+        fn file_prefix() -> &'static str {
+            "assets"
+        }
     }
     pub struct Resource;
     impl AssetCategory for Resource {
-        fn file_prefix() -> &'static str { "resources" }
+        fn file_prefix() -> &'static str {
+            "resources"
+        }
     }
 }
 
@@ -104,7 +105,10 @@ pub trait AssetExt {
     fn read_ron<T: DeserializeOwned>(asset_path: &str) -> AssetResult<T>;
 }
 
-impl<T> AssetExt for T where T: Asset {
+impl<T> AssetExt for T
+where
+    T: Asset,
+{
     fn get_file(asset_path: &str, extension: &str) -> PathBuf {
         T::Category::get_file(asset_path, extension)
     }
@@ -143,7 +147,10 @@ impl Resources {
     pub fn new() -> Resources {
         Self::default()
     }
-    pub fn get<T>(&mut self, asset_path: &str) -> &T where T: Asset<Category=category::Resource> + Default + 'static {
+    pub fn get<T>(&mut self, asset_path: &str) -> &T
+    where
+        T: Asset<Category = category::Resource> + Default + 'static,
+    {
         if !self.resources.contains_key(asset_path) {
             let asset = match T::read(asset_path) {
                 Ok(value) => {
@@ -155,20 +162,40 @@ impl Resources {
                     Default::default()
                 }
             };
-            self.resources.insert(asset_path.to_owned(), Box::new(asset));
+            self.resources
+                .insert(asset_path.to_owned(), Box::new(asset));
         }
-        
-        return self.resources.get(asset_path).unwrap().downcast_ref().expect("resource previously loaded as a different type")
+
+        return self
+            .resources
+            .get(asset_path)
+            .unwrap()
+            .downcast_ref()
+            .expect("resource previously loaded as a different type");
     }
-    pub fn try_get<T>(&mut self, asset_path: &str) -> Option<&T> where T: 'static {
-        return self.resources.get(asset_path).map(|asset| asset.downcast_ref().expect("resource previously loaded as a different type"))
+    pub fn try_get<T>(&mut self, asset_path: &str) -> Option<&T>
+    where
+        T: 'static,
+    {
+        return self.resources.get(asset_path).map(|asset| {
+            asset
+                .downcast_ref()
+                .expect("resource previously loaded as a different type")
+        });
     }
-    pub fn insert<T>(&mut self, asset_path: &str, asset: T) where T: 'static {
+    pub fn insert<T>(&mut self, asset_path: &str, asset: T)
+    where
+        T: 'static,
+    {
         if self.resources.contains_key(asset_path) {
-            log::warn!("Tried to create resource {} that already exists", asset_path);
+            log::warn!(
+                "Tried to create resource {} that already exists",
+                asset_path
+            );
             return;
         }
         log::debug!("Created resource {}", asset_path);
-        self.resources.insert(asset_path.to_owned(), Box::new(asset));
+        self.resources
+            .insert(asset_path.to_owned(), Box::new(asset));
     }
 }

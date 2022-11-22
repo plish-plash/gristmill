@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "gristmill",
-    "gristmill-2d",
     "gristmill-gui",
-    "gristmill-examples",
+    "examples",
 ]
