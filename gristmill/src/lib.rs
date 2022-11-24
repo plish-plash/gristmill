@@ -1,12 +1,10 @@
 pub mod asset;
-pub mod event;
 mod game;
 pub mod geom2d;
 pub mod input;
 mod object;
 pub mod render;
 
-pub use downcast_rs::*;
 pub use game::*;
 pub use glam as math;
 pub use object::*;

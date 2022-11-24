@@ -1,41 +1,28 @@
-use glam::{DVec2, IVec2};
 use serde::{Deserialize, Serialize};
-use winit::dpi::PhysicalPosition;
+use std::collections::HashMap;
 use winit::event::{
     DeviceEvent, ElementState, Event, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent,
 };
 
-use crate::{event, impl_ron_asset};
-
-// -------------------------------------------------------------------------------------------------
-
-#[derive(Copy, Clone, PartialEq, Default, Debug)]
-pub struct Axis2 {
-    pub x: f32,
-    pub y: f32,
-}
-
-pub trait InputActions {
-    fn end_frame(&mut self);
-    fn set_action_state(&mut self, target: &str, state: ActionState);
-}
+use crate::asset::{Asset, AssetResult, AssetWrite};
+use crate::math::Vec2;
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum InputState {
     Button(bool),
     Axis1(f32),
-    Axis2(Axis2),
+    Axis2(Vec2),
 }
 
 impl InputState {
-    fn to_button(self) -> bool {
+    fn as_button(self) -> bool {
         match self {
             InputState::Button(b) => b,
             InputState::Axis1(v) => v.abs() >= 0.5,
             InputState::Axis2(_) => panic!("axis2 input can't be bound to button action"),
         }
     }
-    fn to_axis1(self) -> f32 {
+    fn as_axis1(self) -> f32 {
         match self {
             InputState::Button(b) => {
                 if b {
@@ -48,152 +35,108 @@ impl InputState {
             InputState::Axis2(_) => panic!("axis2 input can't be bound to axis1 action"),
         }
     }
-    fn to_axis2(self) -> Axis2 {
+    fn as_axis2(self) -> Vec2 {
         match self {
             InputState::Button(_) => panic!("button input can't be bound to axis2 action"),
-            InputState::Axis1(v) => Axis2 { x: v, y: 0.0 },
+            InputState::Axis1(v) => Vec2 { x: v, y: 0.0 },
             InputState::Axis2(v) => v,
         }
     }
 }
 
-#[derive(Clone)]
 pub struct ActionState {
+    changed: bool,
     state: InputState,
-    mouse_position: Option<IVec2>,
+    pointer: Option<Vec2>,
 }
 
 impl ActionState {
-    fn new(state: InputState) -> ActionState {
+    fn new(state: InputState) -> Self {
         ActionState {
-            state,
-            mouse_position: None,
-        }
-    }
-    fn new_button() -> ActionState {
-        Self::new(InputState::Button(false))
-    }
-    fn set_mouse_position(&mut self, mouse_position: PhysicalPosition<f64>) {
-        let point = DVec2::new(mouse_position.x, mouse_position.y);
-        self.mouse_position = Some(point.as_ivec2());
-    }
-}
-
-pub struct Action<T> {
-    state: T,
-    changed: bool,
-}
-
-impl<T> Action<T> {
-    pub fn end_frame(&mut self) {
-        self.changed = false;
-    }
-}
-impl<T> Action<T>
-where
-    T: Copy,
-{
-    pub fn get(&self) -> T {
-        self.state
-    }
-}
-impl<T> Action<T>
-where
-    T: PartialEq,
-{
-    fn set_state_value(&mut self, state: T) {
-        if self.state != state {
-            self.state = state;
-            self.changed = true;
-        }
-    }
-}
-impl<T> Default for Action<T>
-where
-    T: Default,
-{
-    fn default() -> Action<T> {
-        Action {
-            state: T::default(),
             changed: false,
+            state,
+            pointer: None,
         }
     }
-}
 
-impl Action<bool> {
-    pub fn set_state(&mut self, state: ActionState) {
-        self.set_state_value(state.state.to_button());
+    pub fn changed(&self) -> bool {
+        self.changed
     }
+    pub fn pointer(&self) -> Option<Vec2> {
+        self.pointer
+    }
+
+    pub fn button_state(&self) -> bool {
+        self.state.as_button()
+    }
+    pub fn axis1_state(&self) -> f32 {
+        self.state.as_axis1()
+    }
+    pub fn axis2_state(&self) -> Vec2 {
+        self.state.as_axis2()
+    }
+
     pub fn pressed(&self) -> bool {
-        self.state
+        self.button_state()
+    }
+    pub fn released(&self) -> bool {
+        !self.button_state()
     }
     pub fn just_pressed(&self) -> bool {
-        self.state && self.changed
+        self.pressed() && self.changed
     }
     pub fn just_released(&self) -> bool {
-        !self.state && self.changed
-    }
-}
-impl Action<f32> {
-    pub fn set_state(&mut self, state: ActionState) {
-        self.set_state_value(state.state.to_axis1());
-    }
-}
-impl Action<Axis2> {
-    pub fn set_state(&mut self, state: ActionState) {
-        self.set_state_value(state.state.to_axis2());
+        self.released() && self.changed
     }
 }
 
-#[derive(Default)]
-pub struct CursorAction {
-    button: Action<bool>,
-    position: IVec2,
-}
+pub struct InputActions(HashMap<String, ActionState>);
 
-impl CursorAction {
-    pub fn get(&self) -> bool {
-        self.button.get()
+impl InputActions {
+    fn end_frame(&mut self) {
+        for (_, action) in self.0.iter_mut() {
+            action.changed = false;
+        }
     }
-    pub fn pressed(&self) -> bool {
-        self.button.pressed()
+    fn set_state(&mut self, key: &str, state: InputState, pointer: Option<Vec2>) {
+        if let Some(action) = self.0.get_mut(key) {
+            action.pointer = pointer;
+            if action.state != state {
+                action.state = state;
+                action.changed = true;
+            }
+        }
     }
-    pub fn just_pressed(&self) -> bool {
-        self.button.just_pressed()
-    }
-    pub fn just_released(&self) -> bool {
-        self.button.just_released()
-    }
-    pub fn position(&self) -> IVec2 {
-        self.position
-    }
-
-    pub fn end_frame(&mut self) {
-        self.button.end_frame();
-    }
-    pub fn set_state(&mut self, state: ActionState) {
-        self.position = state
-            .mouse_position
-            .expect("only mouse buttons can be bound to CursorAction");
-        self.button.set_state(state);
+    pub fn get(&self, key: &str) -> &ActionState {
+        self.0.get(key).expect("action not bound")
     }
 }
-
-// -------------------------------------------------------------------------------------------------
 
 trait Binding {
     fn event(&mut self, event: &Event<()>) -> bool;
-    fn state(&self) -> ActionState;
+    fn state(&self) -> InputState;
+    fn pointer(&self) -> Option<Vec2> {
+        None
+    }
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct KeyboardBinding {
+#[derive(Clone, Serialize, Deserialize)]
+pub struct KeyBinding {
     key: VirtualKeyCode,
     #[serde(skip)]
     pressed: bool,
 }
 
-impl Binding for KeyboardBinding {
+impl KeyBinding {
+    pub fn new(key: VirtualKeyCode) -> Self {
+        KeyBinding {
+            key,
+            pressed: false,
+        }
+    }
+}
+
+impl Binding for KeyBinding {
     fn event(&mut self, event: &Event<()>) -> bool {
         if let Event::WindowEvent {
             event:
@@ -216,67 +159,111 @@ impl Binding for KeyboardBinding {
         }
         false
     }
-    fn state(&self) -> ActionState {
-        ActionState::new(InputState::Button(self.pressed))
+    fn state(&self) -> InputState {
+        InputState::Button(self.pressed)
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
-enum CompositeDirection {
-    Up,
-    Down,
-    Left,
-    Right,
+#[derive(Clone, Serialize, Deserialize)]
+pub struct KeyAxis1Binding {
+    up: KeyBinding,
+    down: KeyBinding,
 }
 
-impl CompositeDirection {
-    fn to_index(self) -> usize {
-        match self {
-            CompositeDirection::Up => 0,
-            CompositeDirection::Down => 1,
-            CompositeDirection::Left => 2,
-            CompositeDirection::Right => 3,
+impl KeyAxis1Binding {
+    pub fn new(up: VirtualKeyCode, down: VirtualKeyCode) -> Self {
+        KeyAxis1Binding {
+            up: KeyBinding::new(up),
+            down: KeyBinding::new(down),
         }
     }
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct KeyboardCompositeBinding {
-    directions: [KeyboardBinding; 4],
-}
-
-impl Binding for KeyboardCompositeBinding {
+impl Binding for KeyAxis1Binding {
     fn event(&mut self, event: &Event<()>) -> bool {
         let mut changed = false;
-        for binding in self.directions.iter_mut() {
-            changed |= binding.event(event);
-        }
+        changed |= self.up.event(event);
+        changed |= self.down.event(event);
         changed
     }
-    fn state(&self) -> ActionState {
+    fn state(&self) -> InputState {
         let mut x = 0.;
-        let mut y = 0.;
-        if self.directions[CompositeDirection::Up.to_index()].pressed {
-            y += 1.0;
-        }
-        if self.directions[CompositeDirection::Down.to_index()].pressed {
-            y -= 1.0;
-        }
-        if self.directions[CompositeDirection::Left.to_index()].pressed {
-            x -= 1.0;
-        }
-        if self.directions[CompositeDirection::Right.to_index()].pressed {
+        if self.up.pressed {
             x += 1.0;
         }
-        ActionState::new(InputState::Axis2(Axis2 { x, y }))
+        if self.down.pressed {
+            x -= 1.0;
+        }
+        InputState::Axis1(x)
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
+pub struct KeyAxis2Binding {
+    up: KeyBinding,
+    down: KeyBinding,
+    left: KeyBinding,
+    right: KeyBinding,
+}
+
+impl KeyAxis2Binding {
+    pub fn new(
+        up: VirtualKeyCode,
+        down: VirtualKeyCode,
+        left: VirtualKeyCode,
+        right: VirtualKeyCode,
+    ) -> Self {
+        KeyAxis2Binding {
+            up: KeyBinding::new(up),
+            down: KeyBinding::new(down),
+            left: KeyBinding::new(left),
+            right: KeyBinding::new(right),
+        }
+    }
+}
+
+impl Binding for KeyAxis2Binding {
+    fn event(&mut self, event: &Event<()>) -> bool {
+        let mut changed = false;
+        changed |= self.up.event(event);
+        changed |= self.down.event(event);
+        changed |= self.left.event(event);
+        changed |= self.right.event(event);
+        changed
+    }
+    fn state(&self) -> InputState {
+        let mut x = 0.;
+        let mut y = 0.;
+        if self.up.pressed {
+            y += 1.0;
+        }
+        if self.down.pressed {
+            y -= 1.0;
+        }
+        if self.left.pressed {
+            x -= 1.0;
+        }
+        if self.right.pressed {
+            x += 1.0;
+        }
+        InputState::Axis2(Vec2 { x, y })
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 pub struct MouseButtonBinding {
     button: MouseButton,
-    #[serde(skip, default = "ActionState::new_button")]
-    state: ActionState,
+    #[serde(skip)]
+    state: (bool, [f32; 2]),
+}
+
+impl MouseButtonBinding {
+    pub fn new(button: MouseButton) -> Self {
+        MouseButtonBinding {
+            button,
+            state: Default::default(),
+        }
+    }
 }
 
 impl Binding for MouseButtonBinding {
@@ -286,7 +273,7 @@ impl Binding for MouseButtonBinding {
             ..
         } = event
         {
-            self.state.set_mouse_position(*position);
+            self.state.1 = position.cast::<f32>().into();
             return true;
         } else if let Event::WindowEvent {
             event: WindowEvent::MouseInput { state, button, .. },
@@ -294,22 +281,34 @@ impl Binding for MouseButtonBinding {
         } = event
         {
             if *button == self.button {
-                self.state.state = InputState::Button(*state == ElementState::Pressed);
+                self.state.0 = *state == ElementState::Pressed;
                 return true;
             }
         }
         false
     }
-    fn state(&self) -> ActionState {
-        self.state.clone()
+    fn state(&self) -> InputState {
+        InputState::Button(self.state.0)
+    }
+    fn pointer(&self) -> Option<Vec2> {
+        Some(self.state.1.into())
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct MouseMotionBinding {
     sensitivity: f32,
     #[serde(skip)]
-    motion: Axis2,
+    motion: Vec2,
+}
+
+impl MouseMotionBinding {
+    pub fn new(sensitivity: f32) -> Self {
+        MouseMotionBinding {
+            sensitivity,
+            motion: Vec2::ZERO,
+        }
+    }
 }
 
 impl Binding for MouseMotionBinding {
@@ -324,111 +323,141 @@ impl Binding for MouseMotionBinding {
         }
         false
     }
-    fn state(&self) -> ActionState {
-        ActionState::new(InputState::Axis2(self.motion))
+    fn state(&self) -> InputState {
+        InputState::Axis2(self.motion)
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 enum BindingEnum {
-    // Button
-    Keyboard(KeyboardBinding),
+    Key(KeyBinding),
+    KeyAxis1(KeyAxis1Binding),
+    KeyAxis2(KeyAxis2Binding),
     MouseButton(MouseButtonBinding),
-    // Axis2
-    KeyboardComposite(KeyboardCompositeBinding),
     MouseMotion(MouseMotionBinding),
 }
 
 impl Binding for BindingEnum {
     fn event(&mut self, event: &Event<()>) -> bool {
         match self {
-            BindingEnum::Keyboard(binding) => binding.event(event),
+            BindingEnum::Key(binding) => binding.event(event),
+            BindingEnum::KeyAxis1(binding) => binding.event(event),
+            BindingEnum::KeyAxis2(binding) => binding.event(event),
             BindingEnum::MouseButton(binding) => binding.event(event),
-            BindingEnum::KeyboardComposite(binding) => binding.event(event),
             BindingEnum::MouseMotion(binding) => binding.event(event),
         }
     }
-    fn state(&self) -> ActionState {
+    fn state(&self) -> InputState {
         match self {
-            BindingEnum::Keyboard(binding) => binding.state(),
+            BindingEnum::Key(binding) => binding.state(),
+            BindingEnum::KeyAxis1(binding) => binding.state(),
+            BindingEnum::KeyAxis2(binding) => binding.state(),
             BindingEnum::MouseButton(binding) => binding.state(),
-            BindingEnum::KeyboardComposite(binding) => binding.state(),
             BindingEnum::MouseMotion(binding) => binding.state(),
+        }
+    }
+    fn pointer(&self) -> Option<Vec2> {
+        match self {
+            BindingEnum::Key(binding) => binding.pointer(),
+            BindingEnum::KeyAxis1(binding) => binding.pointer(),
+            BindingEnum::KeyAxis2(binding) => binding.pointer(),
+            BindingEnum::MouseButton(binding) => binding.pointer(),
+            BindingEnum::MouseMotion(binding) => binding.pointer(),
         }
     }
 }
 
-#[derive(Default, Serialize, Deserialize)]
-pub struct InputBindings {
-    bindings: Vec<(String, BindingEnum)>,
-}
-
-impl_ron_asset!(InputBindings, Config);
+#[derive(Default, Clone, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct InputBindings(Vec<(String, BindingEnum)>);
 
 impl InputBindings {
+    fn create_actions(&self) -> InputActions {
+        InputActions(HashMap::from_iter(self.0.iter().map(|(key, binding)| {
+            (key.clone(), ActionState::new(binding.state()))
+        })))
+    }
+
     pub fn len(&self) -> usize {
-        self.bindings.len()
+        self.0.len()
     }
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    pub fn add_key(&mut self, key: &str, binding: KeyBinding) {
+        self.0.push((key.to_owned(), BindingEnum::Key(binding)));
+    }
+    pub fn add_key_axis1(&mut self, key: &str, binding: KeyAxis1Binding) {
+        self.0
+            .push((key.to_owned(), BindingEnum::KeyAxis1(binding)));
+    }
+    pub fn add_key_axis2(&mut self, key: &str, binding: KeyAxis2Binding) {
+        self.0
+            .push((key.to_owned(), BindingEnum::KeyAxis2(binding)));
+    }
+    pub fn add_mouse_button(&mut self, key: &str, binding: MouseButtonBinding) {
+        self.0
+            .push((key.to_owned(), BindingEnum::MouseButton(binding)));
+    }
+    pub fn add_mouse_motion(&mut self, key: &str, binding: MouseMotionBinding) {
+        self.0
+            .push((key.to_owned(), BindingEnum::MouseMotion(binding)));
+    }
+}
+
+impl Asset for InputBindings {
+    fn extension() -> &'static str {
+        "ron"
+    }
+    fn read_from<R: std::io::Read>(reader: R) -> AssetResult<Self> {
+        crate::asset::util::read_ron(reader)
+    }
+}
+
+impl AssetWrite for InputBindings {
+    fn write_to<W: std::io::Write>(writer: W, value: &Self) -> AssetResult<()> {
+        crate::asset::util::write_ron(writer, value)
     }
 }
 
 pub struct InputSystem {
     bindings: InputBindings,
-    event_system: event::EventSystem<InputEvent>,
-    has_dispatched: bool,
+    actions: InputActions,
 }
 
 impl InputSystem {
-    pub(crate) fn new(bindings: InputBindings) -> InputSystem {
+    pub fn new(bindings: InputBindings) -> InputSystem {
         InputSystem {
+            actions: bindings.create_actions(),
             bindings,
-            event_system: event::EventSystem::new(),
-            has_dispatched: false,
         }
     }
-    pub(crate) fn start_frame(&mut self) {
+
+    pub fn actions(&self) -> &InputActions {
+        &self.actions
+    }
+
+    pub fn start_frame(&mut self) {
         // MouseMotionBindings work differently than others. The values are accumulated over each frame, then reset.
-        for (index, (_, binding)) in self.bindings.bindings.iter_mut().enumerate() {
+        for (key, binding) in self.bindings.0.iter_mut() {
             if let BindingEnum::MouseMotion(binding) = binding {
-                self.event_system.fire_event(InputEvent::new(index));
-                binding.motion = Axis2::default();
+                self.actions
+                    .set_state(key, binding.state(), binding.pointer());
+                binding.motion = Vec2::ZERO;
             }
         }
     }
-    pub fn dispatch_queue<T: InputActions>(&mut self, actions: &mut T) {
-        actions.end_frame();
-        let bindings = &self.bindings;
-        self.event_system.dispatch_queue(move |event| {
-            let (target, binding) = &bindings.bindings[event.binding_index];
-            actions.set_action_state(target, binding.state());
-        });
-        self.has_dispatched = true;
+    pub fn end_frame(&mut self) {
+        self.actions.end_frame();
     }
-    pub(crate) fn end_frame(&mut self) {
-        if self.has_dispatched {
-            self.has_dispatched = false;
-        } else {
-            self.event_system.discard_queue();
-        }
-    }
-    pub(crate) fn input_event(&mut self, event: Event<()>) {
-        // TODO do some matching so we're not checking every event against every binding
-        for (index, (_, binding)) in self.bindings.bindings.iter_mut().enumerate() {
+
+    pub fn input_event(&mut self, event: Event<()>) {
+        for (key, binding) in self.bindings.0.iter_mut() {
             if binding.event(&event) {
-                self.event_system.fire_event(InputEvent::new(index));
+                self.actions
+                    .set_state(key, binding.state(), binding.pointer());
             }
         }
-    }
-}
-
-pub struct InputEvent {
-    binding_index: usize,
-}
-
-impl InputEvent {
-    fn new(binding_index: usize) -> InputEvent {
-        InputEvent { binding_index }
     }
 }

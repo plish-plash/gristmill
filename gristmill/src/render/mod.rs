@@ -25,12 +25,11 @@ use vulkano::{
 };
 use vulkano_win::VkSurfaceBuild;
 use winit::{
-    event::{Event, WindowEvent},
     event_loop::EventLoop,
     window::{Window, WindowBuilder},
 };
 
-use crate::{color::Pixel, geom2d::Rect, input::InputSystem, math::Vec2, Color, Game, GameLoop};
+use crate::{color::Pixel, geom2d::Rect, math::Vec2, Color, Game};
 
 /// This method is called once during initialization, then again whenever the window is resized
 fn window_size_dependent_setup(
@@ -231,12 +230,15 @@ impl RenderContext {
             current_framebuffer_index: 0,
         }
     }
-    fn window(&self) -> &Window {
+    pub(crate) fn window(&self) -> &Window {
         self.surface
             .object()
             .unwrap()
             .downcast_ref::<Window>()
             .unwrap()
+    }
+    pub(crate) fn on_resize(&mut self) {
+        self.recreate_swapchain = true;
     }
     pub(crate) fn finish_setup(&mut self) {
         let uploads = self.current_builder.take().unwrap();
@@ -249,6 +251,7 @@ impl RenderContext {
                 .boxed(),
         );
     }
+
     pub fn begin_render_pass(&mut self, clear_color: Color) {
         self.current_builder
             .as_mut()
@@ -268,7 +271,7 @@ impl RenderContext {
     pub fn end_render_pass(&mut self) {
         self.builder().end_render_pass().unwrap();
     }
-    fn render<G: Game>(&mut self, game: &mut G) {
+    pub(crate) fn render<G: Game>(&mut self, game: &mut G) {
         // Do not draw frame when screen dimensions are zero.
         let dimensions = self.window().inner_size();
         if dimensions.width == 0 || dimensions.height == 0 {
@@ -374,48 +377,5 @@ impl RenderContext {
     }
     pub fn builder(&mut self) -> &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer> {
         self.current_builder.as_mut().expect("not rendering")
-    }
-}
-
-pub(crate) struct RenderGameLoop<G: Game> {
-    context: RenderContext,
-    game: G,
-    input_system: InputSystem,
-}
-
-impl<G: Game> RenderGameLoop<G> {
-    pub fn new(context: RenderContext, game: G, input_system: InputSystem) -> Self {
-        RenderGameLoop {
-            context,
-            game,
-            input_system,
-        }
-    }
-}
-
-impl<G: Game> GameLoop for RenderGameLoop<G> {
-    fn window(&self) -> &Window {
-        self.context.window()
-    }
-    fn update(&mut self, delta: f64) -> bool {
-        self.input_system.start_frame();
-        self.game
-            .update(self.context.window(), &mut self.input_system, delta);
-        self.input_system.end_frame();
-        true
-    }
-    fn event(&mut self, event: Event<()>) {
-        match event {
-            Event::WindowEvent {
-                event: WindowEvent::Resized(_),
-                ..
-            } => {
-                self.context.recreate_swapchain = true;
-            }
-            _ => self.input_system.input_event(event),
-        }
-    }
-    fn render(&mut self) {
-        self.context.render(&mut self.game);
     }
 }

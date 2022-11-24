@@ -6,15 +6,13 @@ pub use button::*;
 pub use image::*;
 pub use text::*;
 
-use std::{any::Any, collections::HashMap};
-
-use gristmill::Obj;
-use serde::{Deserialize, Serialize};
-
 use crate::{
     widget::{Panel, Widget},
     Gui, GuiLayout, GuiNode, GuiNodeExt,
 };
+use gristmill::Obj;
+use serde::{Deserialize, Serialize};
+use std::{any::Any, collections::HashMap};
 
 pub struct Unpacker(HashMap<String, Option<Box<dyn Any>>>);
 
@@ -122,7 +120,7 @@ pub struct PackedPanel<W: PackedWidget> {
 
 impl<W: PackedWidget> PackedWidget for PackedPanel<W> {
     fn unpack(&self, unpacker: &mut Unpacker, gui: &mut Gui, parent: Obj<GuiNode>) -> Obj<GuiNode> {
-        let panel = Panel::create(gui, parent, self.class.as_deref());
+        let panel: Panel = gui.create_widget(parent);
         unpacker.unpack_children(gui, panel.node(), &self.children);
         unpacker.finish_widget(panel, &self.name, &self.layout)
     }

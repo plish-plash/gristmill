@@ -1,14 +1,11 @@
-use crate::widget::WidgetType;
-use gristmill::color::Pixel;
-use gristmill::geom2d::{EdgeRect, Rect, Size};
-use gristmill::Color;
-use serde::{Deserialize, Serialize};
-use std::{
-    borrow::Borrow,
-    collections::HashMap,
-    hash::{Hash, Hasher},
-    str::FromStr,
+use gristmill::{
+    asset::{Asset, AssetResult, AssetWrite},
+    color::Pixel,
+    geom2d::{EdgeRect, Rect, Size},
+    Color,
 };
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
 pub enum StyleValue {
@@ -19,40 +16,54 @@ pub enum StyleValue {
     EdgeRect(EdgeRect),
 }
 
-impl StyleValue {
-    pub fn to_i32(self) -> Option<i32> {
-        match self {
-            StyleValue::Number(num) => Some(num),
-            _ => None,
-        }
-    }
-    pub fn to_color(self) -> Option<Color> {
-        match self {
-            StyleValue::Color(color) => Some(*Color::from_raw(&color)),
-            _ => None,
-        }
-    }
-    pub fn to_size(self) -> Option<Size> {
-        match self {
-            StyleValue::Number(num) => Some(Size::new(num as u32, num as u32)),
-            StyleValue::Size(size) => Some(size),
-            _ => None,
-        }
-    }
-    pub fn to_rect(self) -> Option<Rect> {
-        match self {
-            StyleValue::Rect(rect) => Some(rect),
-            _ => None,
-        }
-    }
-    pub fn to_edge_rect(self) -> Option<EdgeRect> {
-        match self {
-            StyleValue::Number(num) => Some(EdgeRect::splat(num)),
-            StyleValue::EdgeRect(rect) => Some(rect),
-            _ => None,
+impl TryFrom<StyleValue> for i32 {
+    type Error = ();
+    fn try_from(value: StyleValue) -> Result<Self, Self::Error> {
+        match value {
+            StyleValue::Number(num) => Ok(num),
+            _ => Err(()),
         }
     }
 }
+impl TryFrom<StyleValue> for Color {
+    type Error = ();
+    fn try_from(value: StyleValue) -> Result<Self, Self::Error> {
+        match value {
+            StyleValue::Color(color) => Ok(*Color::from_raw(&color)),
+            _ => Err(()),
+        }
+    }
+}
+impl TryFrom<StyleValue> for Size {
+    type Error = ();
+    fn try_from(value: StyleValue) -> Result<Self, Self::Error> {
+        match value {
+            StyleValue::Number(num) => Ok(Size::new(num as u32, num as u32)),
+            StyleValue::Size(size) => Ok(size),
+            _ => Err(()),
+        }
+    }
+}
+impl TryFrom<StyleValue> for Rect {
+    type Error = ();
+    fn try_from(value: StyleValue) -> Result<Self, Self::Error> {
+        match value {
+            StyleValue::Rect(rect) => Ok(rect),
+            _ => Err(()),
+        }
+    }
+}
+impl TryFrom<StyleValue> for EdgeRect {
+    type Error = ();
+    fn try_from(value: StyleValue) -> Result<Self, Self::Error> {
+        match value {
+            StyleValue::Number(num) => Ok(EdgeRect::splat(num)),
+            StyleValue::EdgeRect(rect) => Ok(rect),
+            _ => Err(()),
+        }
+    }
+}
+
 impl From<i32> for StyleValue {
     fn from(val: i32) -> StyleValue {
         StyleValue::Number(val)
@@ -85,7 +96,7 @@ pub struct StyleValues(HashMap<String, StyleValue>);
 
 impl StyleValues {
     pub fn new() -> StyleValues {
-        StyleValues(HashMap::new())
+        Default::default()
     }
     pub fn get(&self, key: &str) -> Option<StyleValue> {
         self.0.get(key).cloned()
@@ -96,90 +107,70 @@ impl StyleValues {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
-pub struct OwnedStyleRule {
-    widget: String,
-    class: Option<String>,
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct WidgetStyles(HashMap<String, StyleValues>);
+
+impl Asset for WidgetStyles {
+    fn extension() -> &'static str {
+        "ron"
+    }
+    fn read_from<R: std::io::Read>(reader: R) -> AssetResult<Self> {
+        gristmill::asset::util::read_ron(reader)
+    }
 }
 
-impl OwnedStyleRule {
-    pub fn new(widget: WidgetType, class: Option<&str>) -> OwnedStyleRule {
-        OwnedStyleRule {
-            widget: widget.0.to_owned(),
-            class: class.map(|s| s.to_owned()),
+impl AssetWrite for WidgetStyles {
+    fn write_to<W: std::io::Write>(writer: W, value: &Self) -> AssetResult<()> {
+        gristmill::asset::util::write_ron(writer, value)
+    }
+}
+
+impl WidgetStyles {
+    pub fn new() -> Self {
+        Default::default()
+    }
+    pub fn with_all_defaults() -> Self {
+        use super::*;
+        let mut styles = Self::new();
+        styles.insert(Image::class_name(), Image::default_style());
+        styles.insert(Text::class_name(), Text::default_style());
+        styles.insert(Button::class_name(), Button::default_style());
+        styles
+    }
+
+    pub fn get(&self, class: &str) -> Option<&StyleValues> {
+        self.0.get(class)
+    }
+    pub fn insert(&mut self, class: &str, values: StyleValues) {
+        self.0.insert(class.to_owned(), values);
+    }
+
+    pub fn query<'a, I>(&self, classes: I) -> StyleQuery
+    where
+        I: IntoIterator<Item = &'a str>,
+    {
+        StyleQuery(
+            classes
+                .into_iter()
+                .filter_map(|class| self.0.get(class))
+                .collect(),
+        )
+    }
+}
+
+pub struct StyleQuery<'a>(Vec<&'a StyleValues>);
+
+impl<'a> StyleQuery<'a> {
+    pub fn get<T>(&self, key: &str, default: T) -> T
+    where
+        T: TryFrom<StyleValue>,
+    {
+        for values in self.0.iter() {
+            if let Some(value) = values.get(key).and_then(|v| T::try_from(v).ok()) {
+                return value;
+            }
         }
-    }
-    pub fn as_ref(&self) -> StyleRule {
-        StyleRule {
-            widget: &self.widget,
-            class: self.class.as_deref(),
-        }
-    }
-}
-impl FromStr for OwnedStyleRule {
-    type Err = std::convert::Infallible;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Some((widget, class)) = s.split_once('.') {
-            Ok(OwnedStyleRule {
-                widget: widget.to_owned(),
-                class: Some(class.to_owned()),
-            })
-        } else {
-            Ok(OwnedStyleRule {
-                widget: s.to_owned(),
-                class: None,
-            })
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct StyleRule<'a> {
-    widget: &'a str,
-    class: Option<&'a str>,
-}
-
-impl<'a> StyleRule<'a> {
-    pub fn new(widget: WidgetType, class: Option<&'a str>) -> StyleRule<'a> {
-        StyleRule {
-            widget: widget.0,
-            class,
-        }
-    }
-}
-
-pub trait Key {
-    fn key(&self) -> StyleRule;
-}
-
-impl Key for OwnedStyleRule {
-    fn key(&self) -> StyleRule {
-        self.as_ref()
-    }
-}
-
-impl<'a> Key for StyleRule<'a> {
-    fn key(&self) -> StyleRule {
-        *self
-    }
-}
-
-impl<'a> Borrow<dyn Key + 'a> for OwnedStyleRule {
-    fn borrow(&self) -> &(dyn Key + 'a) {
-        self
-    }
-}
-
-impl<'a> PartialEq for (dyn Key + 'a) {
-    fn eq(&self, other: &Self) -> bool {
-        self.key().eq(&other.key())
-    }
-}
-
-impl<'a> Eq for (dyn Key + 'a) {}
-
-impl<'a> Hash for (dyn Key + 'a) {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.key().hash(state)
+        default
     }
 }

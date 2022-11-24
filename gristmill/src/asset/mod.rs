@@ -1,10 +1,6 @@
 pub mod image;
-pub mod resource;
 
-use serde::de::DeserializeOwned;
-use std::{any::Any, collections::HashMap, fmt, fs::File, io, path::PathBuf};
-
-// -------------------------------------------------------------------------------------------------
+use std::{any::Any, collections::HashMap, fmt, io::Error as IoError, path::PathBuf};
 
 // Debug: expect working dir to be cargo project, so look for assets relative to that
 #[cfg(debug_assertions)]
@@ -21,17 +17,15 @@ fn asset_base_path() -> PathBuf {
     dir
 }
 
-// -------------------------------------------------------------------------------------------------
-
 #[derive(Debug)]
 pub enum AssetError {
     InvalidData,
     InvalidFormat(String),
-    Io(io::Error),
+    Io(IoError),
 }
 
-impl From<io::Error> for AssetError {
-    fn from(err: io::Error) -> AssetError {
+impl From<IoError> for AssetError {
+    fn from(err: IoError) -> AssetError {
         AssetError::Io(err)
     }
 }
@@ -48,154 +42,105 @@ impl fmt::Display for AssetError {
 
 pub type AssetResult<T> = Result<T, AssetError>;
 
-// -------------------------------------------------------------------------------------------------
+pub trait Asset: Sized + 'static {
+    fn extension() -> &'static str;
+    fn read_from<R: std::io::Read>(reader: R) -> AssetResult<Self>;
+}
 
-type BufReader = io::BufReader<File>;
+pub trait AssetWrite: Asset {
+    fn write_to<W: std::io::Write>(writer: W, value: &Self) -> AssetResult<()>;
+}
 
-pub trait AssetCategory {
-    fn file_prefix() -> &'static str;
-    fn get_file(asset_path: &str, extension: &str) -> PathBuf {
+pub mod util {
+    use super::{asset_base_path, AssetError, AssetResult};
+    use serde::{de::DeserializeOwned, Serialize};
+    use std::fs::File;
+    use std::path::{Path, PathBuf};
+
+    pub type BufReader = std::io::BufReader<File>;
+    pub type BufWriter = std::io::BufWriter<File>;
+
+    pub(crate) fn get_path(prefix: &str, asset_path: &str, extension: &str) -> PathBuf {
         let mut file_path = asset_base_path();
-        file_path.push(Self::file_prefix());
+        file_path.push(prefix);
         file_path.push(asset_path);
         file_path.set_extension(extension);
         file_path
     }
-}
-
-pub mod category {
-    use super::AssetCategory;
-    pub struct Config;
-    impl AssetCategory for Config {
-        fn file_prefix() -> &'static str {
-            "config"
-        }
+    pub fn open_reader(path: &Path) -> AssetResult<BufReader> {
+        log::trace!("Reading file {}", path.to_string_lossy());
+        Ok(BufReader::new(File::open(path)?))
     }
-    pub struct Data;
-    impl AssetCategory for Data {
-        fn file_prefix() -> &'static str {
-            "assets"
-        }
+    pub fn open_writer(path: &Path) -> AssetResult<BufWriter> {
+        log::trace!("Writing file {}", path.to_string_lossy());
+        Ok(BufWriter::new(File::create(path)?))
     }
-    pub struct Resource;
-    impl AssetCategory for Resource {
-        fn file_prefix() -> &'static str {
-            "resources"
-        }
-    }
-}
-
-pub trait Asset: Sized {
-    type Category: AssetCategory;
-    fn read(asset_path: &str) -> AssetResult<Self>;
-    fn try_read(asset_path: &str) -> Option<Self> {
-        match Self::read(asset_path) {
-            Ok(asset) => Some(asset),
-            Err(error) => {
-                log::error!("Failed to load asset {}: {}", asset_path, error);
-                None
-            }
-        }
-    }
-}
-
-pub trait AssetExt {
-    fn get_file(asset_path: &str, extension: &str) -> PathBuf;
-    fn open_file(asset_path: &str, extension: &str) -> AssetResult<BufReader>;
-    fn read_ron<T: DeserializeOwned>(asset_path: &str) -> AssetResult<T>;
-}
-
-impl<T> AssetExt for T
-where
-    T: Asset,
-{
-    fn get_file(asset_path: &str, extension: &str) -> PathBuf {
-        T::Category::get_file(asset_path, extension)
-    }
-    fn open_file(asset_path: &str, extension: &str) -> AssetResult<BufReader> {
-        let file_path = Self::get_file(asset_path, extension);
-        log::trace!("Opening file {}", file_path.to_string_lossy());
-        Ok(BufReader::new(File::open(file_path)?))
-    }
-    fn read_ron<T1: DeserializeOwned>(asset_path: &str) -> AssetResult<T1> {
-        let reader = Self::open_file(asset_path, "ron")?;
+    pub fn read_ron<T: DeserializeOwned, R: std::io::Read>(reader: R) -> AssetResult<T> {
         ron::de::from_reader(reader).map_err(|err| AssetError::InvalidFormat(err.to_string()))
     }
+    pub fn write_ron<T: Serialize, W: std::io::Write>(writer: W, value: &T) -> AssetResult<()> {
+        use ron::ser::PrettyConfig;
+        ron::ser::to_writer_pretty(writer, value, PrettyConfig::new())
+            .map_err(|err| AssetError::InvalidFormat(err.to_string()))
+    }
 }
 
-#[macro_export]
-macro_rules! impl_ron_asset {
-    ($name:ident, $category:ident) => {
-        impl $crate::asset::Asset for $name {
-            type Category = $crate::asset::category::$category;
-            fn read(asset_path: &str) -> $crate::asset::AssetResult<Self> {
-                use $crate::asset::AssetExt;
-                Self::read_ron(asset_path)
+pub struct AssetStorage {
+    prefix: &'static str,
+    assets: HashMap<String, Box<dyn Any>>,
+}
+
+impl AssetStorage {
+    pub fn new(prefix: &'static str) -> Self {
+        AssetStorage {
+            prefix,
+            assets: HashMap::new(),
+        }
+    }
+    pub fn config() -> Self {
+        Self::new("config")
+    }
+    pub fn assets() -> Self {
+        Self::new("assets")
+    }
+    pub fn get<T>(&mut self, asset_path: &str) -> Option<&T>
+    where
+        T: Asset,
+    {
+        if !self.assets.contains_key(asset_path) {
+            let file_path = util::get_path(self.prefix, asset_path, T::extension());
+            match util::open_reader(&file_path).and_then(T::read_from) {
+                Ok(asset) => {
+                    self.assets.insert(asset_path.to_owned(), Box::new(asset));
+                }
+                Err(error) => log::warn!("Failed to load {}: {}", asset_path, error),
             }
         }
-    };
-}
-
-// -------------------------------------------------------------------------------------------------
-
-#[derive(Default)]
-pub struct Resources {
-    resources: HashMap<String, Box<dyn Any>>,
-}
-
-impl Resources {
-    pub fn new() -> Resources {
-        Self::default()
-    }
-    pub fn get<T>(&mut self, asset_path: &str) -> &T
-    where
-        T: Asset<Category = category::Resource> + Default + 'static,
-    {
-        if !self.resources.contains_key(asset_path) {
-            let asset = match T::read(asset_path) {
-                Ok(value) => {
-                    log::debug!("Loaded resource {}", asset_path);
-                    value
-                }
-                Err(error) => {
-                    log::error!("Failed to load resource {}: {}", asset_path, error);
-                    Default::default()
-                }
-            };
-            self.resources
-                .insert(asset_path.to_owned(), Box::new(asset));
-        }
-
-        return self
-            .resources
+        self.assets
             .get(asset_path)
-            .unwrap()
-            .downcast_ref()
-            .expect("resource previously loaded as a different type");
+            .map(|asset| asset.downcast_ref().expect("wrong type for asset"))
     }
-    pub fn try_get<T>(&mut self, asset_path: &str) -> Option<&T>
+    pub fn get_or_save<T, F>(&mut self, asset_path: &str, default: F) -> &T
     where
-        T: 'static,
+        T: AssetWrite,
+        F: FnOnce() -> T,
     {
-        return self.resources.get(asset_path).map(|asset| {
-            asset
-                .downcast_ref()
-                .expect("resource previously loaded as a different type")
-        });
-    }
-    pub fn insert<T>(&mut self, asset_path: &str, asset: T)
-    where
-        T: 'static,
-    {
-        if self.resources.contains_key(asset_path) {
-            log::warn!(
-                "Tried to create resource {} that already exists",
-                asset_path
+        self.get::<T>(asset_path);
+        if !self.assets.contains_key(asset_path) {
+            let file_path = util::get_path(self.prefix, asset_path, T::extension());
+            log::info!(
+                "{} not found, saving defaults to {}",
+                asset_path,
+                file_path.to_str().unwrap_or("")
             );
-            return;
+            let new_asset = default();
+            match util::open_writer(&file_path).and_then(|writer| T::write_to(writer, &new_asset)) {
+                Ok(()) => {}
+                Err(error) => log::error!("Failed to save {}: {}", asset_path, error),
+            }
+            self.assets
+                .insert(asset_path.to_owned(), Box::new(new_asset));
         }
-        log::debug!("Created resource {}", asset_path);
-        self.resources
-            .insert(asset_path.to_owned(), Box::new(asset));
+        self.get(asset_path).unwrap()
     }
 }

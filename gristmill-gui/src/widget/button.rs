@@ -1,39 +1,13 @@
-use crate::widget::{
-    Image, ImageStyle, InputState, StyleValues, Text, TextAlign, TextStyle, Widget, WidgetType,
+use crate::{
+    widget::{Image, StyleQuery, StyleValues, Text, TextAlign, Widget, WidgetInput},
+    Gui, GuiDraw, GuiLayout, GuiNode, WidgetBehavior, WidgetObj,
 };
-use crate::{Gui, GuiDraw, GuiLayout, GuiNode, GuiTexture, WidgetBehavior, WidgetObj};
-use gristmill::color::{IntoColor, LinLumaa};
-use gristmill::geom2d::Size;
-use gristmill::{Color, Obj};
+use gristmill::{
+    color::{IntoColor, LinLumaa},
+    geom2d::{Rect, Size},
+    Color, Obj,
+};
 use serde::{Deserialize, Serialize};
-
-pub struct ButtonStyle {
-    pub background_colors: ButtonColors,
-    pub label: TextStyle,
-    pub size: Size,
-}
-
-impl ButtonStyle {
-    fn from_style(_style: &StyleValues) -> ButtonStyle {
-        // TODO
-        ButtonStyle::default()
-    }
-}
-impl Default for ButtonStyle {
-    fn default() -> Self {
-        let background_colors = ButtonColors {
-            disabled: LinLumaa::new(0.75, 0.5).into_color(),
-            normal: LinLumaa::new(0.75, 1.0).into_color(),
-            hovered: LinLumaa::new(0.8, 1.0).into_color(),
-            pressed: LinLumaa::new(0.9, 1.0).into_color(),
-        };
-        ButtonStyle {
-            background_colors,
-            label: TextStyle::default(),
-            size: Size::new(128, 32),
-        }
-    }
-}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ButtonState {
@@ -49,6 +23,17 @@ pub struct ButtonColors {
     normal: Color,
     hovered: Color,
     pressed: Color,
+}
+
+impl Default for ButtonColors {
+    fn default() -> Self {
+        ButtonColors {
+            disabled: LinLumaa::new(0.75, 0.5).into_color(),
+            normal: LinLumaa::new(0.75, 1.0).into_color(),
+            hovered: LinLumaa::new(0.8, 1.0).into_color(),
+            pressed: LinLumaa::new(0.9, 1.0).into_color(),
+        }
+    }
 }
 
 impl ButtonColors {
@@ -71,14 +56,11 @@ struct ButtonBehavior {
 }
 
 impl WidgetBehavior for ButtonBehavior {
-    fn node(&self) -> Obj<GuiNode> {
-        self.node.clone()
-    }
-    fn update(&mut self, state: InputState) {
+    fn update(&mut self, input: WidgetInput) {
         let prev_state = self.state;
         self.state = if self.interactable {
-            if state.cursor_over {
-                if state.input.primary().pressed() {
+            if input.pointer_over.as_ref() == Some(&self.node) {
+                if input.state.pressed() {
                     ButtonState::Pressed
                 } else {
                     ButtonState::Hovered
@@ -109,36 +91,6 @@ pub struct Button {
 }
 
 impl Button {
-    pub fn create_with_button_style(
-        gui: &mut Gui,
-        parent: Obj<GuiNode>,
-        style: ButtonStyle,
-    ) -> Button {
-        let node = Image::create_with_image_style(
-            parent,
-            ImageStyle {
-                draw: GuiDraw::Rect(GuiTexture::default(), style.background_colors.disabled),
-                size: style.size,
-            },
-        )
-        .node();
-        let behavior = gui.register_behavior(ButtonBehavior {
-            node: node.clone(),
-            colors: style.background_colors,
-            state: ButtonState::Disabled,
-            interactable: false,
-            just_released: false,
-        });
-        let mut label = Text::create_with_text_style(node.clone(), style.label);
-        label.set_layout(GuiLayout::fill());
-        label.set_align(TextAlign::Middle);
-        Button {
-            node,
-            behavior,
-            label,
-        }
-    }
-
     pub fn interact(&self) -> bool {
         let mut behavior = self.behavior.write();
         behavior.interactable = true;
@@ -153,14 +105,40 @@ impl Button {
     {
         self.label.set_text_string(text);
     }
+
+    pub(crate) fn default_style() -> StyleValues {
+        let mut style = StyleValues::new();
+        style.set("size", Size::new(128, 32));
+        style
+    }
 }
 
 impl Widget for Button {
-    fn widget_type() -> WidgetType {
-        WidgetType::button()
+    fn class_name() -> &'static str {
+        "Button"
     }
-    fn create_with_style(gui: &mut Gui, parent: Obj<GuiNode>, style: &StyleValues) -> Button {
-        Self::create_with_button_style(gui, parent, ButtonStyle::from_style(style))
+    fn new(gui: &mut Gui, parent: Obj<GuiNode>) -> Self {
+        let node = Image::new(gui, parent).node();
+        let label = Text::new(gui, node.clone());
+        label.set_layout(GuiLayout::fill());
+        label.set_align(TextAlign::Middle);
+
+        let behavior = gui.register_behavior(ButtonBehavior {
+            node: node.clone(),
+            colors: ButtonColors::default(),
+            state: ButtonState::Disabled,
+            interactable: false,
+            just_released: false,
+        });
+        Button {
+            node,
+            behavior,
+            label,
+        }
+    }
+    fn apply_style(&mut self, style: StyleQuery) {
+        self.node.write().layout =
+            GuiLayout::Child(Rect::from_size(style.get("size", Size::new(128, 32))));
     }
     fn node(&self) -> Obj<GuiNode> {
         self.node.clone()

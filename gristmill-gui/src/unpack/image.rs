@@ -18,8 +18,8 @@ pub struct PackedImage<W: PackedWidget> {
 
 impl<W: PackedWidget> PackedWidget for PackedImage<W> {
     fn unpack(&self, unpacker: &mut Unpacker, gui: &mut Gui, parent: Obj<GuiNode>) -> Obj<GuiNode> {
-        let text = Image::create(gui, parent, self.class.as_deref());
-        unpacker.unpack_children(gui, text.node(), &self.children);
-        unpacker.finish_widget(text, &self.name, &self.layout)
+        let image: Image = gui.create_widget(parent);
+        unpacker.unpack_children(gui, image.node(), &self.children);
+        unpacker.finish_widget(image, &self.name, &self.layout)
     }
 }

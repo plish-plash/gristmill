@@ -204,9 +204,3 @@ impl EdgeRect {
         }
     }
 }
-
-#[derive(Copy, Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
-pub struct Index2D {
-    pub col: usize,
-    pub row: usize,
-}

@@ -3,16 +3,14 @@ mod render;
 pub mod unpack;
 pub mod widget;
 
+use crate::{
+    render::GuiTexture,
+    widget::{Widget, WidgetBehavior, WidgetInput, WidgetObj, WidgetStyles},
+};
 use glyph_brush::OwnedSection;
-use gristmill::input::CursorAction;
-use gristmill::math::IVec2;
-use gristmill::{geom2d::*, Color, Obj, Objects};
+use gristmill::{geom2d::*, input::InputActions, math::IVec2, Color, Obj, Objects};
 use serde::{Deserialize, Serialize};
-use std::cell::Cell;
-use std::sync::Arc;
-
-use crate::render::GuiTexture;
-use crate::widget::{InputState, WidgetBehavior, WidgetObj, WidgetStyles};
+use std::{cell::Cell, sync::Arc};
 
 pub use backend::GuiRenderer;
 
@@ -206,10 +204,6 @@ impl GuiNodeExt for Obj<GuiNode> {
     }
 }
 
-pub trait GuiInputActions {
-    fn primary(&self) -> &CursorAction;
-}
-
 pub struct Gui {
     styles: Arc<WidgetStyles>,
     viewport: Rect,
@@ -239,10 +233,7 @@ impl Gui {
             root,
         }
     }
-    pub fn update<I>(&mut self, input: &I)
-    where
-        I: GuiInputActions,
-    {
+    pub fn update(&mut self, input: &InputActions) {
         self.nodes.cleanup();
         self.behaviors.cleanup();
 
@@ -252,33 +243,35 @@ impl Gui {
         }
         Self::layout_children(&self.root, self.viewport, true);
 
-        // Find the node the cursor is over.
-        fn check_cursor_over(cursor: &CursorAction, node: &Obj<GuiNode>) -> Option<Obj<GuiNode>> {
+        // Find the node the pointer is over.
+        fn check_pointer_over(pointer: IVec2, node: &Obj<GuiNode>) -> Option<Obj<GuiNode>> {
             let node_data = node.read();
             for child in node_data.children.iter().rev() {
-                if let Some(pointer_over) = check_cursor_over(cursor, child) {
+                if let Some(pointer_over) = check_pointer_over(pointer, child) {
                     return Some(pointer_over);
                 }
             }
             if node_data.visible.get()
                 && node_data.flags.pointer_opaque
-                && node_data.rect.get().contains(cursor.position())
+                && node_data.rect.get().contains(pointer)
             {
                 Some(node.clone())
             } else {
                 None
             }
         }
-        let cursor_over = check_cursor_over(input.primary(), &self.root);
+        let pointer_state = input.get("primary");
+        let pointer_over = pointer_state
+            .pointer()
+            .and_then(|p| check_pointer_over(p.as_ivec2(), &self.root));
 
         // Update widget behaviors.
-        let mut state = InputState {
-            input,
-            cursor_over: false,
+        let input = WidgetInput {
+            state: pointer_state,
+            pointer_over: &pointer_over,
         };
         for (_, behavior) in self.behaviors.write().iter_mut() {
-            state.cursor_over = cursor_over == Some(behavior.node());
-            behavior.update(state);
+            behavior.update(input);
         }
     }
     fn layout_children(node: &Obj<GuiNode>, parent_rect: Rect, parent_visible: bool) {
@@ -302,10 +295,13 @@ impl Gui {
         self.root.clone()
     }
 
-    pub fn register_behavior<B>(&self, behavior: B) -> WidgetObj<B>
-    where
-        B: WidgetBehavior,
-    {
+    pub fn register_behavior<B: WidgetBehavior>(&self, behavior: B) -> WidgetObj<B> {
         WidgetObj::new(self.behaviors.insert(Box::new(behavior)))
+    }
+
+    pub fn create_widget<W: Widget>(&mut self, parent: Obj<GuiNode>) -> W {
+        let mut widget = W::new(self, parent);
+        widget.apply_style(self.styles.query([W::class_name()]));
+        widget
     }
 }

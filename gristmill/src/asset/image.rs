@@ -1,7 +1,7 @@
-use crate::asset::{category, Asset, AssetError, AssetExt, AssetResult};
-use crate::geom2d::Size;
-
-// -------------------------------------------------------------------------------------------------
+use crate::{
+    asset::{Asset, AssetError, AssetResult},
+    geom2d::Size,
+};
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum ImageFormat {
@@ -67,9 +67,11 @@ impl Image {
 }
 
 impl Asset for Image {
-    type Category = category::Data;
-    fn read(asset_path: &str) -> AssetResult<Self> {
-        let decoder = png::Decoder::new(Self::open_file(asset_path, "png")?);
+    fn extension() -> &'static str {
+        "png"
+    }
+    fn read_from<R: std::io::Read>(reader: R) -> AssetResult<Self> {
+        let decoder = png::Decoder::new(reader);
         let mut reader = decoder.read_info().unwrap();
         let mut buffer = vec![0; reader.output_buffer_size()];
         let info = reader.next_frame(&mut buffer).unwrap();

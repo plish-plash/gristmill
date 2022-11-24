@@ -1,50 +1,19 @@
-use crate::widget::{StyleValue, StyleValues, Widget, WidgetType};
-use crate::{Gui, GuiDraw, GuiFlags, GuiNode, GuiNodeExt, GuiTexture};
-use gristmill::geom2d::{Rect, Size};
-use gristmill::{Color, Obj};
-
-pub struct ImageStyle {
-    pub draw: GuiDraw,
-    pub size: Size,
-}
-
-impl ImageStyle {
-    fn from_style(style: &StyleValues) -> ImageStyle {
-        ImageStyle {
-            draw: GuiDraw::Rect(
-                GuiTexture::default(),
-                style
-                    .get("color")
-                    .and_then(StyleValue::to_color)
-                    .unwrap_or(crate::color::WHITE),
-            ),
-            size: style
-                .get("size")
-                .and_then(StyleValue::to_size)
-                .unwrap_or(Size::new(64, 64)),
-        }
-    }
-}
-impl Default for ImageStyle {
-    fn default() -> ImageStyle {
-        ImageStyle {
-            draw: GuiDraw::Rect(GuiTexture::default(), crate::color::WHITE),
-            size: Size::new(64, 64),
-        }
-    }
-}
+use crate::{
+    widget::{StyleQuery, StyleValues, Widget},
+    Gui, GuiDraw, GuiFlags, GuiLayout, GuiNode, GuiNodeExt, GuiTexture,
+};
+use gristmill::{
+    geom2d::{Rect, Size},
+    Color, Obj,
+};
 
 pub struct Image(Obj<GuiNode>);
 
 impl Image {
-    pub fn create_with_image_style(parent: Obj<GuiNode>, style: ImageStyle) -> Image {
-        let flags = GuiFlags {
-            pointer_opaque: true,
-            ..Default::default()
-        };
-        let node = parent.add_child(GuiNode::new(flags, style.draw, Rect::from_size(style.size)));
-        Image(node)
-    }
+    const DEFAULT_SIZE: Size = Size {
+        width: 64,
+        height: 64,
+    };
 
     pub fn set_texture(&self, texture: GuiTexture) {
         self.0.write().draw = GuiDraw::Rect(texture, crate::color::WHITE);
@@ -52,14 +21,40 @@ impl Image {
     pub fn set_texture_and_color(&self, texture: GuiTexture, color: Color) {
         self.0.write().draw = GuiDraw::Rect(texture, color);
     }
+
+    pub(crate) fn default_style() -> StyleValues {
+        let mut style = StyleValues::new();
+        style.set("color", crate::color::WHITE);
+        style.set("size", Image::DEFAULT_SIZE);
+        style
+    }
 }
 
 impl Widget for Image {
-    fn widget_type() -> WidgetType {
-        WidgetType::image()
+    fn class_name() -> &'static str {
+        "Image"
     }
-    fn create_with_style(_gui: &mut Gui, parent: Obj<GuiNode>, style: &StyleValues) -> Image {
-        Self::create_with_image_style(parent, ImageStyle::from_style(style))
+    fn new(_gui: &mut Gui, parent: Obj<GuiNode>) -> Self {
+        let flags = GuiFlags {
+            pointer_opaque: true,
+            ..Default::default()
+        };
+        let draw = GuiDraw::Rect(GuiTexture::default(), crate::color::WHITE);
+        let node = parent.add_child(GuiNode::new(
+            flags,
+            draw,
+            Rect::from_size(Image::DEFAULT_SIZE),
+        ));
+        Image(node)
+    }
+    fn apply_style(&mut self, style: StyleQuery) {
+        let mut write_guard = self.0.write();
+        write_guard.draw = GuiDraw::Rect(
+            GuiTexture::default(),
+            style.get("color", crate::color::WHITE),
+        );
+        write_guard.layout =
+            GuiLayout::Child(Rect::from_size(style.get("size", Image::DEFAULT_SIZE)));
     }
     fn node(&self) -> Obj<GuiNode> {
         self.0.clone()

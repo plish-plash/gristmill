@@ -1,14 +1,13 @@
-use crate::widget::{InputState, StyleValues, Widget, WidgetType};
-use crate::{Gui, GuiDraw, GuiLayout, GuiNode, GuiNodeExt, WidgetBehavior, WidgetObj};
+use crate::{
+    widget::{Widget, WidgetInput},
+    Gui, GuiDraw, GuiLayout, GuiNode, GuiNodeExt, WidgetBehavior, WidgetObj,
+};
 use gristmill::Obj;
 
 struct PanelBehavior(Obj<GuiNode>);
 
 impl WidgetBehavior for PanelBehavior {
-    fn node(&self) -> Obj<GuiNode> {
-        self.0.clone()
-    }
-    fn update(&mut self, _state: InputState) {
+    fn update(&mut self, _input: WidgetInput) {
         // Changes to flags don't propagate until next frame.
         self.0.write().flags.visible = false;
     }
@@ -26,10 +25,10 @@ impl Panel {
 }
 
 impl Widget for Panel {
-    fn widget_type() -> WidgetType {
-        WidgetType::panel()
+    fn class_name() -> &'static str {
+        "Panel"
     }
-    fn create_with_style(gui: &mut Gui, parent: Obj<GuiNode>, _style: &StyleValues) -> Panel {
+    fn new(gui: &mut Gui, parent: Obj<GuiNode>) -> Self {
         let node = parent.add_child(GuiNode {
             layout: GuiLayout::fill(),
             ..Default::default()

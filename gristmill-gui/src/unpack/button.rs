@@ -2,10 +2,7 @@ use gristmill::Obj;
 use serde::{Deserialize, Serialize};
 
 use super::{PackedWidget, Unpacker};
-use crate::{
-    widget::{Button, Widget},
-    Gui, GuiLayout, GuiNode,
-};
+use crate::{widget::Button, Gui, GuiLayout, GuiNode};
 
 #[derive(Serialize, Deserialize)]
 pub struct PackedButton {
@@ -17,7 +14,7 @@ pub struct PackedButton {
 
 impl PackedWidget for PackedButton {
     fn unpack(&self, unpacker: &mut Unpacker, gui: &mut Gui, parent: Obj<GuiNode>) -> Obj<GuiNode> {
-        let button = Button::create(gui, parent, self.class.as_deref());
+        let button: Button = gui.create_widget(parent);
         button.set_label_string(&self.label);
         unpacker.finish_widget(button, &self.name, &self.layout)
     }

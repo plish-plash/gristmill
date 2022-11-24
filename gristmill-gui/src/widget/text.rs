@@ -1,10 +1,14 @@
-use crate::widget::{StyleValue, StyleValues, Widget, WidgetType};
-use crate::{Gui, GuiDraw, GuiLayout, GuiNode, GuiNodeExt};
+use crate::{
+    widget::{StyleQuery, StyleValues, Widget},
+    Gui, GuiDraw, GuiLayout, GuiNode, GuiNodeExt,
+};
 use glyph_brush::*;
-use gristmill::color::Pixel;
-use gristmill::geom2d::{Rect, Size};
-use gristmill::math::IVec2;
-use gristmill::Obj;
+use gristmill::{
+    color::Pixel,
+    geom2d::{Rect, Size},
+    math::IVec2,
+    Obj,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -48,35 +52,17 @@ impl From<TextAlign> for Layout<BuiltInLineBreaker> {
     }
 }
 
-pub struct TextStyle {
+struct TextStyle {
     pub font: FontId,
     pub font_size: i32,
-    pub align: TextAlign,
     pub color: gristmill::Color,
 }
 
-impl TextStyle {
-    fn from_style(style: &StyleValues) -> TextStyle {
-        TextStyle {
-            font_size: style
-                .get("font-size")
-                .and_then(StyleValue::to_i32)
-                .unwrap_or(18),
-            color: style
-                .get("color")
-                .and_then(StyleValue::to_color)
-                .unwrap_or(crate::color::BLACK),
-            // TODO other fields
-            ..Default::default()
-        }
-    }
-}
 impl Default for TextStyle {
     fn default() -> TextStyle {
         TextStyle {
             font: FontId::default(),
             font_size: 18,
-            align: TextAlign::Left,
             color: crate::color::BLACK,
         }
     }
@@ -88,15 +74,6 @@ pub struct Text {
 }
 
 impl Text {
-    pub fn create_with_text_style(parent: Obj<GuiNode>, style: TextStyle) -> Text {
-        let draw = GuiDraw::Text(OwnedSection::default().with_layout(style.align));
-        let node = parent.add_child(GuiNode::with_draw_and_layout(
-            draw,
-            GuiLayout::Child(Rect::new(IVec2::ZERO, Size::new(256, 32))),
-        ));
-        Text { style, node }
-    }
-
     pub fn set_text(&self, text: Vec<OwnedText>) {
         if let GuiDraw::Text(section) = &mut self.node.write().draw {
             section.text = text;
@@ -112,20 +89,40 @@ impl Text {
             .with_color(self.style.color.into_raw::<[f32; 4]>());
         self.set_text(vec![text]);
     }
-    pub fn set_align(&mut self, align: TextAlign) {
-        self.style.align = align;
+    pub fn set_align(&self, align: TextAlign) {
         if let GuiDraw::Text(section) = &mut self.node.write().draw {
             section.layout = align.into();
         }
     }
+
+    pub(crate) fn default_style() -> StyleValues {
+        let default = TextStyle::default();
+        let mut style = StyleValues::new();
+        style.set("font-size", default.font_size);
+        style.set("color", default.color);
+        style
+    }
 }
 
 impl Widget for Text {
-    fn widget_type() -> WidgetType {
-        WidgetType::text()
+    fn class_name() -> &'static str {
+        "Text"
     }
-    fn create_with_style(_gui: &mut Gui, parent: Obj<GuiNode>, style: &StyleValues) -> Text {
-        Self::create_with_text_style(parent, TextStyle::from_style(style))
+    fn new(_gui: &mut Gui, parent: Obj<GuiNode>) -> Self {
+        let node = parent.add_child(GuiNode::with_draw_and_layout(
+            GuiDraw::Text(OwnedSection::default()),
+            GuiLayout::Child(Rect::new(IVec2::ZERO, Size::new(256, 32))),
+        ));
+        Text {
+            style: TextStyle::default(),
+            node,
+        }
+    }
+    fn apply_style(&mut self, style: StyleQuery) {
+        let default = TextStyle::default();
+        // TODO font
+        self.style.font_size = style.get("font-size", default.font_size);
+        self.style.color = style.get("color", default.color);
     }
     fn node(&self) -> Obj<GuiNode> {
         self.node.clone()
