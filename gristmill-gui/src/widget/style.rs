@@ -1,5 +1,5 @@
 use gristmill::{
-    asset::{Asset, AssetResult, AssetWrite},
+    asset::{Asset, AssetResult, AssetWrite, BufReader, BufWriter},
     color::Pixel,
     geom2d::{EdgeRect, Rect, Size},
     Color,
@@ -112,16 +112,13 @@ impl StyleValues {
 pub struct WidgetStyles(HashMap<String, StyleValues>);
 
 impl Asset for WidgetStyles {
-    fn extension() -> &'static str {
-        "ron"
-    }
-    fn read_from<R: std::io::Read>(reader: R) -> AssetResult<Self> {
+    fn read_from(reader: BufReader) -> AssetResult<Self> {
         gristmill::asset::util::read_ron(reader)
     }
 }
 
 impl AssetWrite for WidgetStyles {
-    fn write_to<W: std::io::Write>(writer: W, value: &Self) -> AssetResult<()> {
+    fn write_to(value: &Self, writer: BufWriter) -> AssetResult<()> {
         gristmill::asset::util::write_ron(writer, value)
     }
 }

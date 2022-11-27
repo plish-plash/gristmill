@@ -20,7 +20,9 @@ pareen = "0.3"
 # Graphics
 vulkano = "0.32"
 vulkano-win = "0.32"
+vulkano-shaders = "0.32"
+bytemuck = "1.12"
 winit = { version = "0.27", features = ["serde"] }
 
 # Assets
-png = "0.17"
+image = { version = "0.24", default-features = false, features = ["png", "bmp"] }

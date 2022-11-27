@@ -59,7 +59,7 @@ struct GuiGame {
 impl Game for GuiGame {
     fn load(mut config: AssetStorage, context: &mut RenderContext) -> Self {
         let gui_styles = config
-            .get_or_save("styles", WidgetStyles::with_all_defaults)
+            .get_or_save("styles.ron", WidgetStyles::with_all_defaults)
             .clone();
         let mut gui = Gui::with_styles(gui_styles);
         let example = ButtonExample::new(&mut gui);
@@ -77,9 +77,9 @@ impl Game for GuiGame {
     }
 
     fn render(&mut self, context: &mut RenderContext) {
-        self.gui_renderer.pre_render(context, &mut self.scene.gui);
+        self.gui_renderer.process(context, &mut self.scene.gui);
         context.begin_render_pass(Color::new(0.0, 0.5, 0.5, 1.0));
-        self.gui_renderer.render(context);
+        self.gui_renderer.draw_all(context);
         context.end_render_pass();
     }
 }

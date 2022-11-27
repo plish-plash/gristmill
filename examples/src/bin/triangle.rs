@@ -93,7 +93,7 @@ impl ExampleRenderer {
             },
         ];
         let vertex_buffer = CpuAccessibleBuffer::from_iter(
-            &context.allocator(),
+            context.allocator(),
             BufferUsage {
                 vertex_buffer: true,
                 ..BufferUsage::empty()
@@ -129,7 +129,11 @@ impl Game for TriangleGame {
         }
     }
 
-    fn update(&mut self, _window: &mut GameWindow, _input: &InputActions, _delta: f64) {}
+    fn update(&mut self, window: &mut GameWindow, input: &InputActions, _delta: f64) {
+        if input.get("exit").pressed() {
+            window.close();
+        }
+    }
 
     fn render(&mut self, context: &mut RenderContext) {
         context.begin_render_pass(Color::new(0.0, 0.0, 1.0, 1.0));

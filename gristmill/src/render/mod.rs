@@ -1,3 +1,8 @@
+pub mod material;
+pub mod texture;
+pub mod texture_rect;
+
+use crate::{color::Pixel, geom2d::Rect, math::Vec2, Color, Game};
 use std::sync::Arc;
 use vulkano::{
     command_buffer::{
@@ -10,7 +15,8 @@ use vulkano::{
     device::{
         physical::PhysicalDeviceType, Device, DeviceCreateInfo, DeviceExtensions, QueueCreateInfo,
     },
-    image::{view::ImageView, ImageAccess, ImageUsage, SwapchainImage},
+    format::Format,
+    image::{view::ImageView, AttachmentImage, ImageAccess, ImageUsage, SwapchainImage},
     instance::{Instance, InstanceCreateInfo},
     memory::allocator::StandardMemoryAllocator,
     pipeline::graphics::viewport::Viewport,
@@ -29,16 +35,20 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-use crate::{color::Pixel, geom2d::Rect, math::Vec2, Color, Game};
-
 /// This method is called once during initialization, then again whenever the window is resized
 fn window_size_dependent_setup(
+    memory_allocator: &StandardMemoryAllocator,
     images: &[Arc<SwapchainImage>],
     render_pass: Arc<RenderPass>,
     viewport: &mut Viewport,
 ) -> Vec<Arc<Framebuffer>> {
     let dimensions = images[0].dimensions().width_height();
     viewport.dimensions = [dimensions[0] as f32, dimensions[1] as f32];
+
+    let depth_buffer = ImageView::new_default(
+        AttachmentImage::transient(memory_allocator, dimensions, Format::D16_UNORM).unwrap(),
+    )
+    .unwrap();
 
     images
         .iter()
@@ -47,7 +57,7 @@ fn window_size_dependent_setup(
             Framebuffer::new(
                 render_pass.clone(),
                 FramebufferCreateInfo {
-                    attachments: vec![view],
+                    attachments: vec![view, depth_buffer.clone()],
                     ..Default::default()
                 },
             )
@@ -188,11 +198,17 @@ impl RenderContext {
                     store: Store,
                     format: swapchain.image_format(),
                     samples: 1,
+                },
+                depth: {
+                    load: Clear,
+                    store: DontCare,
+                    format: Format::D16_UNORM,
+                    samples: 1,
                 }
             },
             pass: {
                 color: [color],
-                depth_stencil: {}
+                depth_stencil: {depth}
             }
         )
         .unwrap();
@@ -202,7 +218,13 @@ impl RenderContext {
             dimensions: [0.0, 0.0],
             depth_range: 0.0..1.0,
         };
-        let framebuffers = window_size_dependent_setup(&images, render_pass.clone(), &mut viewport);
+        let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
+        let framebuffers = window_size_dependent_setup(
+            &memory_allocator,
+            &images,
+            render_pass.clone(),
+            &mut viewport,
+        );
 
         let command_buffer_allocator =
             StandardCommandBufferAllocator::new(device.clone(), Default::default());
@@ -217,7 +239,7 @@ impl RenderContext {
             surface,
             device: device.clone(),
             queue,
-            memory_allocator: Arc::new(StandardMemoryAllocator::new_default(device.clone())),
+            memory_allocator,
             descriptor_set_allocator: StandardDescriptorSetAllocator::new(device),
             command_buffer_allocator,
             render_pass,
@@ -246,7 +268,7 @@ impl RenderContext {
             uploads
                 .build()
                 .unwrap()
-                .execute(self.queue())
+                .execute(self.queue.clone())
                 .unwrap()
                 .boxed(),
         );
@@ -258,7 +280,10 @@ impl RenderContext {
             .expect("not rendering")
             .begin_render_pass(
                 RenderPassBeginInfo {
-                    clear_values: vec![Some(clear_color.into_raw::<[f32; 4]>().into())],
+                    clear_values: vec![
+                        Some(clear_color.into_raw::<[f32; 4]>().into()),
+                        Some(1f32.into()),
+                    ],
                     ..RenderPassBeginInfo::framebuffer(
                         self.framebuffers[self.current_framebuffer_index].clone(),
                     )
@@ -294,6 +319,7 @@ impl RenderContext {
 
             self.swapchain = new_swapchain;
             self.framebuffers = window_size_dependent_setup(
+                &self.memory_allocator,
                 &new_images,
                 self.render_pass.clone(),
                 &mut self.viewport,
@@ -357,14 +383,14 @@ impl RenderContext {
     pub fn device(&self) -> Arc<Device> {
         self.device.clone()
     }
-    pub fn queue(&self) -> Arc<Queue> {
-        self.queue.clone()
+    pub fn queue(&self) -> &Arc<Queue> {
+        &self.queue
     }
     pub fn render_pass(&self) -> Subpass {
         Subpass::from(self.render_pass.clone(), 0).unwrap()
     }
-    pub fn allocator(&self) -> Arc<StandardMemoryAllocator> {
-        self.memory_allocator.clone()
+    pub fn allocator(&self) -> &Arc<StandardMemoryAllocator> {
+        &self.memory_allocator
     }
     pub fn descriptor_set_allocator(&self) -> &StandardDescriptorSetAllocator {
         &self.descriptor_set_allocator

@@ -4,7 +4,7 @@ use winit::event::{
     DeviceEvent, ElementState, Event, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent,
 };
 
-use crate::asset::{Asset, AssetResult, AssetWrite};
+use crate::asset::{Asset, AssetResult, AssetWrite, BufReader, BufWriter};
 use crate::math::Vec2;
 
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -407,16 +407,13 @@ impl InputBindings {
 }
 
 impl Asset for InputBindings {
-    fn extension() -> &'static str {
-        "ron"
-    }
-    fn read_from<R: std::io::Read>(reader: R) -> AssetResult<Self> {
+    fn read_from(reader: BufReader) -> AssetResult<Self> {
         crate::asset::util::read_ron(reader)
     }
 }
 
 impl AssetWrite for InputBindings {
-    fn write_to<W: std::io::Write>(writer: W, value: &Self) -> AssetResult<()> {
+    fn write_to(value: &Self, writer: BufWriter) -> AssetResult<()> {
         crate::asset::util::write_ron(writer, value)
     }
 }

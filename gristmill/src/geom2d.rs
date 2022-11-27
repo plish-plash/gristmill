@@ -1,6 +1,9 @@
 use glam::{IVec2, Vec2};
 use serde::{Deserialize, Serialize};
-use std::ops::{Add, AddAssign};
+use std::{
+    fmt::{Display, Formatter},
+    ops::{Add, AddAssign},
+};
 
 #[derive(Copy, Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
 pub struct Size {
@@ -26,6 +29,12 @@ impl Size {
     }
     pub fn as_ivec2(self) -> IVec2 {
         IVec2::new(self.width as i32, self.height as i32)
+    }
+}
+
+impl Display for Size {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}x{}", self.width, self.height)
     }
 }
 

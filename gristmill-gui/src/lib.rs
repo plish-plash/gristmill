@@ -1,18 +1,16 @@
-mod backend;
 mod render;
 pub mod unpack;
 pub mod widget;
 
-use crate::{
-    render::GuiTexture,
-    widget::{Widget, WidgetBehavior, WidgetInput, WidgetObj, WidgetStyles},
-};
+use crate::widget::{Widget, WidgetBehavior, WidgetInput, WidgetObj, WidgetStyles};
 use glyph_brush::OwnedSection;
-use gristmill::{geom2d::*, input::InputActions, math::IVec2, Color, Obj, Objects};
+use gristmill::{
+    geom2d::*, input::InputActions, math::IVec2, render::texture::Texture, Color, Obj, Objects,
+};
 use serde::{Deserialize, Serialize};
 use std::{cell::Cell, sync::Arc};
 
-pub use backend::GuiRenderer;
+pub use render::GuiRenderer;
 
 mod color {
     use gristmill::color::{rgb::Rgb, Alpha};
@@ -104,7 +102,7 @@ impl GuiLayout {
 #[derive(Clone)]
 pub enum GuiDraw {
     None,
-    Rect(GuiTexture, Color),
+    Rect(Option<Texture>, Color),
     Text(OwnedSection),
 }
 
@@ -120,7 +118,7 @@ pub struct GuiNode {
     pub layout: GuiLayout,
     pub draw: GuiDraw,
     pub offset: Rect,
-    rect: Cell<Rect>,
+    rect: Cell<(Rect, u32)>,
     visible: Cell<bool>,
     children: Vec<Obj<GuiNode>>,
 }
@@ -151,11 +149,11 @@ impl GuiNode {
         }
     }
 
-    fn get_draw_rect(&self) -> Rect {
-        let mut rect = self.rect.get();
+    fn draw_rect(&self) -> (Rect, u32) {
+        let (mut rect, depth) = self.rect.get();
         rect.position += self.offset.position;
         rect.size += self.offset.size;
-        rect
+        (rect, depth)
     }
 }
 
@@ -241,7 +239,7 @@ impl Gui {
         for (_, node) in self.nodes.read().iter() {
             node.visible.set(false);
         }
-        Self::layout_children(&self.root, self.viewport, true);
+        Self::layout_children(&self.root, self.viewport, true, 1);
 
         // Find the node the pointer is over.
         fn check_pointer_over(pointer: IVec2, node: &Obj<GuiNode>) -> Option<Obj<GuiNode>> {
@@ -253,7 +251,7 @@ impl Gui {
             }
             if node_data.visible.get()
                 && node_data.flags.pointer_opaque
-                && node_data.rect.get().contains(pointer)
+                && node_data.rect.get().0.contains(pointer)
             {
                 Some(node.clone())
             } else {
@@ -274,15 +272,15 @@ impl Gui {
             behavior.update(input);
         }
     }
-    fn layout_children(node: &Obj<GuiNode>, parent_rect: Rect, parent_visible: bool) {
+    fn layout_children(node: &Obj<GuiNode>, parent_rect: Rect, parent_visible: bool, depth: u32) {
         let mut previous_rect = None;
         node.visit_children(|child| {
             let node_data = child.read();
             let rect = node_data.layout.layout(parent_rect, previous_rect);
             let visible = parent_visible && node_data.flags.visible;
-            node_data.rect.set(rect);
+            node_data.rect.set((rect, depth));
             node_data.visible.set(visible);
-            Self::layout_children(child, rect, visible);
+            Self::layout_children(child, rect, visible, depth + 1);
             previous_rect = Some(rect);
         });
     }

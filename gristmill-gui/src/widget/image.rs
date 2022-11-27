@@ -1,9 +1,10 @@
 use crate::{
     widget::{StyleQuery, StyleValues, Widget},
-    Gui, GuiDraw, GuiFlags, GuiLayout, GuiNode, GuiNodeExt, GuiTexture,
+    Gui, GuiDraw, GuiFlags, GuiLayout, GuiNode, GuiNodeExt,
 };
 use gristmill::{
     geom2d::{Rect, Size},
+    render::texture::Texture,
     Color, Obj,
 };
 
@@ -15,10 +16,10 @@ impl Image {
         height: 64,
     };
 
-    pub fn set_texture(&self, texture: GuiTexture) {
+    pub fn set_texture(&self, texture: Option<Texture>) {
         self.0.write().draw = GuiDraw::Rect(texture, crate::color::WHITE);
     }
-    pub fn set_texture_and_color(&self, texture: GuiTexture, color: Color) {
+    pub fn set_texture_and_color(&self, texture: Option<Texture>, color: Color) {
         self.0.write().draw = GuiDraw::Rect(texture, color);
     }
 
@@ -39,7 +40,7 @@ impl Widget for Image {
             pointer_opaque: true,
             ..Default::default()
         };
-        let draw = GuiDraw::Rect(GuiTexture::default(), crate::color::WHITE);
+        let draw = GuiDraw::Rect(None, crate::color::WHITE);
         let node = parent.add_child(GuiNode::new(
             flags,
             draw,
@@ -49,10 +50,7 @@ impl Widget for Image {
     }
     fn apply_style(&mut self, style: StyleQuery) {
         let mut write_guard = self.0.write();
-        write_guard.draw = GuiDraw::Rect(
-            GuiTexture::default(),
-            style.get("color", crate::color::WHITE),
-        );
+        write_guard.draw = GuiDraw::Rect(None, style.get("color", crate::color::WHITE));
         write_guard.layout =
             GuiLayout::Child(Rect::from_size(style.get("size", Image::DEFAULT_SIZE)));
     }

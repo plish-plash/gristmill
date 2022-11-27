@@ -1,6 +1,9 @@
 pub mod image;
 
-use std::{any::Any, collections::HashMap, fmt, io::Error as IoError, path::PathBuf};
+use std::{any::Any, collections::HashMap, fmt, fs::File, io::Error as IoError, path::PathBuf};
+
+pub type BufReader = std::io::BufReader<File>;
+pub type BufWriter = std::io::BufWriter<File>;
 
 // Debug: expect working dir to be cargo project, so look for assets relative to that
 #[cfg(debug_assertions)]
@@ -43,28 +46,50 @@ impl fmt::Display for AssetError {
 pub type AssetResult<T> = Result<T, AssetError>;
 
 pub trait Asset: Sized + 'static {
-    fn extension() -> &'static str;
-    fn read_from<R: std::io::Read>(reader: R) -> AssetResult<Self>;
+    fn read_from(reader: BufReader) -> AssetResult<Self>;
+    fn load(prefix: &str, asset_path: &str) -> Option<Self> {
+        let file_path = util::get_path(prefix, asset_path);
+        match util::open_reader(&file_path).and_then(Self::read_from) {
+            Ok(asset) => Some(asset),
+            Err(error) => {
+                log::warn!(
+                    "Failed to load {}: {}",
+                    file_path.to_str().unwrap_or(""),
+                    error
+                );
+                None
+            }
+        }
+    }
 }
 
 pub trait AssetWrite: Asset {
-    fn write_to<W: std::io::Write>(writer: W, value: &Self) -> AssetResult<()>;
+    fn write_to(value: &Self, writer: BufWriter) -> AssetResult<()>;
+    fn save(value: &Self, prefix: &str, asset_path: &str) {
+        let file_path = util::get_path(prefix, asset_path);
+        match util::open_writer(&file_path).and_then(|writer| Self::write_to(value, writer)) {
+            Ok(()) => (),
+            Err(error) => log::error!(
+                "Failed to save {}: {}",
+                file_path.to_str().unwrap_or(""),
+                error
+            ),
+        }
+    }
 }
 
 pub mod util {
-    use super::{asset_base_path, AssetError, AssetResult};
+    use super::{asset_base_path, AssetError, AssetResult, BufReader, BufWriter};
     use serde::{de::DeserializeOwned, Serialize};
-    use std::fs::File;
-    use std::path::{Path, PathBuf};
+    use std::{
+        fs::File,
+        path::{Path, PathBuf},
+    };
 
-    pub type BufReader = std::io::BufReader<File>;
-    pub type BufWriter = std::io::BufWriter<File>;
-
-    pub(crate) fn get_path(prefix: &str, asset_path: &str, extension: &str) -> PathBuf {
+    pub(crate) fn get_path(prefix: &str, asset_path: &str) -> PathBuf {
         let mut file_path = asset_base_path();
         file_path.push(prefix);
         file_path.push(asset_path);
-        file_path.set_extension(extension);
         file_path
     }
     pub fn open_reader(path: &Path) -> AssetResult<BufReader> {
@@ -108,12 +133,8 @@ impl AssetStorage {
         T: Asset,
     {
         if !self.assets.contains_key(asset_path) {
-            let file_path = util::get_path(self.prefix, asset_path, T::extension());
-            match util::open_reader(&file_path).and_then(T::read_from) {
-                Ok(asset) => {
-                    self.assets.insert(asset_path.to_owned(), Box::new(asset));
-                }
-                Err(error) => log::warn!("Failed to load {}: {}", asset_path, error),
+            if let Some(asset) = T::load(self.prefix, asset_path) {
+                self.assets.insert(asset_path.to_owned(), Box::new(asset));
             }
         }
         self.assets
@@ -127,17 +148,9 @@ impl AssetStorage {
     {
         self.get::<T>(asset_path);
         if !self.assets.contains_key(asset_path) {
-            let file_path = util::get_path(self.prefix, asset_path, T::extension());
-            log::info!(
-                "{} not found, saving defaults to {}",
-                asset_path,
-                file_path.to_str().unwrap_or("")
-            );
+            log::info!("Saving defaults for asset {}", asset_path,);
             let new_asset = default();
-            match util::open_writer(&file_path).and_then(|writer| T::write_to(writer, &new_asset)) {
-                Ok(()) => {}
-                Err(error) => log::error!("Failed to save {}: {}", asset_path, error),
-            }
+            AssetWrite::save(&new_asset, self.prefix, asset_path);
             self.assets
                 .insert(asset_path.to_owned(), Box::new(new_asset));
         }

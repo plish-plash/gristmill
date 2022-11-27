@@ -2,10 +2,10 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use winit::window::Window;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
+    window::{CursorGrabMode, Window},
 };
 
 use crate::{
@@ -25,18 +25,29 @@ pub trait Game: Sized + 'static {
 
 pub struct GameWindow<'a> {
     window: &'a Window,
-    exit: bool,
+    close: bool,
 }
 
 impl<'a> GameWindow<'a> {
     fn new(window: &'a Window) -> Self {
         GameWindow {
             window,
-            exit: false,
+            close: false,
         }
     }
-    pub fn exit(&mut self) {
-        self.exit = true;
+    pub fn close(&mut self) {
+        self.close = true;
+    }
+    pub fn grab_cursor(&self) {
+        self.window
+            .set_cursor_grab(CursorGrabMode::Confined)
+            .or_else(|_e| self.window.set_cursor_grab(CursorGrabMode::Locked))
+            .unwrap();
+        self.window.set_cursor_visible(false);
+    }
+    pub fn ungrab_cursor(&self) {
+        self.window.set_cursor_grab(CursorGrabMode::None).unwrap();
+        self.window.set_cursor_visible(true);
     }
 }
 
@@ -61,7 +72,7 @@ impl<G: Game> GameLoop<G> {
         self.game
             .update(&mut window, self.input_system.actions(), delta);
         self.input_system.end_frame();
-        !window.exit
+        !window.close
     }
     fn event(&mut self, event: Event<()>) {
         match event {
@@ -125,7 +136,7 @@ fn default_controls() -> InputBindings {
     let mut controls = InputBindings::default();
     controls.add_mouse_button("primary", MouseButtonBinding::new(MouseButton::Left));
     controls.add_mouse_button("secondary", MouseButtonBinding::new(MouseButton::Right));
-    controls.add_key("quit", KeyBinding::new(Key::Escape));
+    controls.add_key("exit", KeyBinding::new(Key::Escape));
     controls.add_mouse_motion("look", MouseMotionBinding::new(0.1));
     controls.add_key_axis2("move", KeyAxis2Binding::new(Key::W, Key::S, Key::A, Key::D));
     controls.add_key("jump", KeyBinding::new(Key::Space));
@@ -140,7 +151,7 @@ pub fn run_game<G: Game>() -> ! {
     let mut context = RenderContext::create_window(&event_loop);
 
     let mut config = AssetStorage::config();
-    let input_bindings = config.get_or_save("controls", default_controls).clone();
+    let input_bindings = config.get_or_save("controls.ron", default_controls).clone();
     let game = G::load(config, &mut context);
     context.finish_setup();
 
