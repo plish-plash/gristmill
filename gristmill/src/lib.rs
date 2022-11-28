@@ -2,12 +2,11 @@ pub mod asset;
 mod game;
 pub mod geom2d;
 pub mod input;
-mod object;
+pub mod object;
 pub mod render;
 
 pub use game::*;
 pub use glam as math;
-pub use object::*;
 pub use palette as color;
 pub use pareen as tween;
 

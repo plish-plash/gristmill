@@ -163,13 +163,13 @@ where
     }
 }
 
-impl<P, I> MaterialCache<P, I>
+impl<P, I> Clone for MaterialCache<P, I>
 where
     P: MaterialPipeline + Clone,
     I: Send + Sync,
     [I]: BufferContents,
 {
-    pub fn new_shared(&self) -> Self {
+    fn clone(&self) -> Self {
         MaterialCache {
             pipeline: self.pipeline.clone(),
             buffer_pool: self.buffer_pool.clone(),

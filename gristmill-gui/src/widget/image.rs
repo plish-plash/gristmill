@@ -1,14 +1,14 @@
 use crate::{
     widget::{StyleQuery, StyleValues, Widget},
-    Gui, GuiDraw, GuiFlags, GuiLayout, GuiNode, GuiNodeExt,
+    Gui, GuiDraw, GuiFlags, GuiLayout, GuiNode, GuiNodeExt, GuiNodeObj,
 };
 use gristmill::{
     geom2d::{Rect, Size},
     render::texture::Texture,
-    Color, Obj,
+    Color,
 };
 
-pub struct Image(Obj<GuiNode>);
+pub struct Image(GuiNodeObj);
 
 impl Image {
     const DEFAULT_SIZE: Size = Size {
@@ -35,7 +35,7 @@ impl Widget for Image {
     fn class_name() -> &'static str {
         "Image"
     }
-    fn new(_gui: &mut Gui, parent: Obj<GuiNode>) -> Self {
+    fn new(_gui: &mut Gui, parent: GuiNodeObj) -> Self {
         let flags = GuiFlags {
             pointer_opaque: true,
             ..Default::default()
@@ -54,7 +54,7 @@ impl Widget for Image {
         write_guard.layout =
             GuiLayout::Child(Rect::from_size(style.get("size", Image::DEFAULT_SIZE)));
     }
-    fn node(&self) -> Obj<GuiNode> {
-        self.0.clone()
+    fn node(&self) -> &GuiNodeObj {
+        &self.0
     }
 }

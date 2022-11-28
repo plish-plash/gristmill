@@ -34,13 +34,13 @@ mod vs {
             layout(location = 1) in vec4 rect;
             layout(location = 2) in vec4 uv_rect;
             layout(location = 3) in vec4 color;
-            layout(location = 4) in float depth;
+            layout(location = 4) in float z;
 
             layout(location = 0) out vec2 v_uv;
             layout(location = 1) out vec4 v_color;
 
             void main() {
-                gl_Position = vec4(rect.xy + (position * rect.zw), depth, 1);
+                gl_Position = vec4(rect.xy + (position * rect.zw), z, 1);
                 v_uv = uv_rect.xy + (abs(position) * uv_rect.zw);
                 v_color = color;
             }"
@@ -77,9 +77,23 @@ pub struct Instance {
     pub rect: [f32; 4],
     pub uv_rect: [f32; 4],
     pub color: [f32; 4],
-    pub depth: f32,
+    pub z: f32,
 }
-impl_vertex!(Instance, rect, uv_rect, color, depth);
+impl_vertex!(Instance, rect, uv_rect, color, z);
+
+impl Instance {
+    pub fn transform_to_viewport(self, viewport_extents: (f32, f32)) -> Self {
+        Instance {
+            rect: [
+                (self.rect[0] / viewport_extents.0) - 1.0,
+                (self.rect[1] / viewport_extents.1) - 1.0,
+                self.rect[2] / viewport_extents.0,
+                self.rect[3] / viewport_extents.1,
+            ],
+            ..self
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct TextureRectPipeline {

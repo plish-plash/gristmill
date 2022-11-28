@@ -1,11 +1,9 @@
-use gristmill::Obj;
-use serde::{Deserialize, Serialize};
-
 use super::{PackedWidget, Unpacker};
 use crate::{
     widget::{Text, TextAlign},
-    Gui, GuiLayout, GuiNode,
+    Gui, GuiLayout, GuiNodeObj,
 };
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct PackedText {
@@ -17,7 +15,7 @@ pub struct PackedText {
 }
 
 impl PackedWidget for PackedText {
-    fn unpack(&self, unpacker: &mut Unpacker, gui: &mut Gui, parent: Obj<GuiNode>) -> Obj<GuiNode> {
+    fn unpack(&self, unpacker: &mut Unpacker, gui: &mut Gui, parent: GuiNodeObj) -> GuiNodeObj {
         let text: Text = gui.create_widget(parent);
         text.set_text_string(&self.text);
         if let Some(align) = self.align {

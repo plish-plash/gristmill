@@ -2,13 +2,15 @@ mod render;
 pub mod unpack;
 pub mod widget;
 
-use crate::widget::{Widget, WidgetBehavior, WidgetInput, WidgetObj, WidgetStyles};
+use crate::widget::{Widget, WidgetBehavior, WidgetInput, WidgetStyles};
 use glyph_brush::OwnedSection;
+use gristmill::object::DenseSlotMap;
 use gristmill::{
-    geom2d::*, input::InputActions, math::IVec2, render::texture::Texture, Color, Obj, Objects,
+    geom2d::*, input::InputActions, math::IVec2, new_object_type, object::ObjectCollection,
+    render::texture::Texture, Color,
 };
 use serde::{Deserialize, Serialize};
-use std::{cell::Cell, sync::Arc};
+use std::sync::Arc;
 
 pub use render::GuiRenderer;
 
@@ -118,9 +120,10 @@ pub struct GuiNode {
     pub layout: GuiLayout,
     pub draw: GuiDraw,
     pub offset: Rect,
-    rect: Cell<(Rect, u32)>,
-    visible: Cell<bool>,
-    children: Vec<Obj<GuiNode>>,
+    rect: Rect,
+    z: u32,
+    visible: bool,
+    children: Vec<GuiNodeKey>,
 }
 
 impl GuiNode {
@@ -130,8 +133,9 @@ impl GuiNode {
             layout: GuiLayout::Child(rect),
             draw,
             offset: Rect::ZERO,
-            rect: Cell::default(),
-            visible: Cell::default(),
+            rect: Rect::ZERO,
+            z: 0,
+            visible: false,
             children: Vec::new(),
         }
     }
@@ -150,40 +154,32 @@ impl GuiNode {
     }
 
     fn draw_rect(&self) -> (Rect, u32) {
-        let (mut rect, depth) = self.rect.get();
+        let mut rect = self.rect;
         rect.position += self.offset.position;
         rect.size += self.offset.size;
-        (rect, depth)
+        (rect, self.z)
     }
 }
 
 pub trait GuiNodeExt {
-    fn add_child(&self, node: GuiNode) -> Obj<GuiNode>;
-    fn remove_child(&self, node: &Obj<GuiNode>) -> bool;
-    fn visit_children<F>(&self, f: F)
-    where
-        F: FnMut(&Self);
-    fn visit_descendants<F>(&self, f: &mut F)
-    where
-        F: FnMut(&Self),
-    {
-        self.visit_children(|child| {
-            f(child);
-            child.visit_descendants(f);
-        });
-    }
+    fn add_child(&self, node: GuiNode) -> GuiNodeObj;
+    fn remove_child(&self, node: &GuiNodeObj) -> bool;
 }
 
-impl GuiNodeExt for Obj<GuiNode> {
-    fn add_child(&self, node: GuiNode) -> Obj<GuiNode> {
+impl GuiNodeExt for GuiNodeObj {
+    fn add_child(&self, node: GuiNode) -> GuiNodeObj {
         let child = self.objects().insert(node);
         let mut write_guard = self.write();
-        write_guard.children.push(child.clone());
+        write_guard.children.push(child.key());
         child
     }
-    fn remove_child(&self, child: &Obj<GuiNode>) -> bool {
+    fn remove_child(&self, child: &GuiNodeObj) -> bool {
         let mut write_guard = self.write();
-        let index = if let Some(index) = write_guard.children.iter().position(|ch| ch == child) {
+        let index = if let Some(index) = write_guard
+            .children
+            .iter()
+            .position(|ch| *ch == child.key())
+        {
             index
         } else {
             return false;
@@ -191,23 +187,16 @@ impl GuiNodeExt for Obj<GuiNode> {
         write_guard.children.remove(index);
         true
     }
-    fn visit_children<F>(&self, mut f: F)
-    where
-        F: FnMut(&Self),
-    {
-        let read_guard = self.read();
-        for child in read_guard.children.iter() {
-            f(child);
-        }
-    }
 }
+
+new_object_type!(GuiNode, GuiNodeKey, GuiNodeObj, GuiNodeObjects);
 
 pub struct Gui {
     styles: Arc<WidgetStyles>,
     viewport: Rect,
-    nodes: Objects<GuiNode>,
-    behaviors: Objects<Box<dyn WidgetBehavior>>,
-    root: Obj<GuiNode>,
+    nodes: GuiNodeObjects,
+    behaviors: Vec<Arc<dyn WidgetBehavior>>,
+    root: GuiNodeKey,
 }
 
 impl Default for Gui {
@@ -221,39 +210,41 @@ impl Gui {
         Gui::with_styles(WidgetStyles::new())
     }
     pub fn with_styles(styles: WidgetStyles) -> Gui {
-        let nodes = Objects::new();
-        let root = nodes.insert(GuiNode::default());
+        let nodes = GuiNodeObjects::default();
+        let root = nodes.insert(GuiNode::default()).key();
         Gui {
             styles: Arc::new(styles),
             viewport: Rect::ZERO,
             nodes,
-            behaviors: Objects::new(),
+            behaviors: Vec::new(),
             root,
         }
     }
     pub fn update(&mut self, input: &InputActions) {
-        self.nodes.cleanup();
-        self.behaviors.cleanup();
-
         // Layout all nodes.
-        for (_, node) in self.nodes.read().iter() {
-            node.visible.set(false);
+        let mut write_guard = self.nodes.write().unwrap();
+        for (_, node) in write_guard.iter_mut() {
+            node.visible = false;
         }
-        Self::layout_children(&self.root, self.viewport, true, 1);
+        Self::layout_children(&mut write_guard, self.root, self.viewport, true, 1);
 
         // Find the node the pointer is over.
-        fn check_pointer_over(pointer: IVec2, node: &Obj<GuiNode>) -> Option<Obj<GuiNode>> {
-            let node_data = node.read();
+        fn check_pointer_over(
+            nodes: &DenseSlotMap<GuiNodeKey, GuiNode>,
+            node: GuiNodeKey,
+            pointer: IVec2,
+        ) -> Option<GuiNodeKey> {
+            let node_data = &nodes[node];
             for child in node_data.children.iter().rev() {
-                if let Some(pointer_over) = check_pointer_over(pointer, child) {
+                if let Some(pointer_over) = check_pointer_over(nodes, *child, pointer) {
                     return Some(pointer_over);
                 }
             }
-            if node_data.visible.get()
+            if node_data.visible
                 && node_data.flags.pointer_opaque
-                && node_data.rect.get().0.contains(pointer)
+                && node_data.rect.contains(pointer)
             {
-                Some(node.clone())
+                Some(node)
             } else {
                 None
             }
@@ -261,43 +252,52 @@ impl Gui {
         let pointer_state = input.get("primary");
         let pointer_over = pointer_state
             .pointer()
-            .and_then(|p| check_pointer_over(p.as_ivec2(), &self.root));
+            .and_then(|p| check_pointer_over(&write_guard, self.root, p.as_ivec2()));
+        drop(write_guard);
 
         // Update widget behaviors.
         let input = WidgetInput {
             state: pointer_state,
-            pointer_over: &pointer_over,
+            pointer_over,
         };
-        for (_, behavior) in self.behaviors.write().iter_mut() {
+        for behavior in self.behaviors.iter() {
             behavior.update(input);
         }
     }
-    fn layout_children(node: &Obj<GuiNode>, parent_rect: Rect, parent_visible: bool, depth: u32) {
+    fn layout_children(
+        nodes: &mut DenseSlotMap<GuiNodeKey, GuiNode>,
+        node: GuiNodeKey,
+        parent_rect: Rect,
+        parent_visible: bool,
+        z: u32,
+    ) {
         let mut previous_rect = None;
-        node.visit_children(|child| {
-            let node_data = child.read();
-            let rect = node_data.layout.layout(parent_rect, previous_rect);
+        let children = nodes.get(node).unwrap().children.clone();
+        for child in children {
+            let node_data = nodes.get_mut(child).unwrap();
             let visible = parent_visible && node_data.flags.visible;
-            node_data.rect.set((rect, depth));
-            node_data.visible.set(visible);
-            Self::layout_children(child, rect, visible, depth + 1);
+            let rect = node_data.layout.layout(parent_rect, previous_rect);
+            node_data.visible = visible;
+            node_data.rect = rect;
+            node_data.z = z;
+            Self::layout_children(nodes, child, rect, visible, z + 1);
             previous_rect = Some(rect);
-        });
+        }
     }
 
     pub fn styles(&mut self) -> Arc<WidgetStyles> {
         self.styles.clone()
     }
 
-    pub fn root(&self) -> Obj<GuiNode> {
-        self.root.clone()
+    pub fn root(&self) -> GuiNodeObj {
+        GuiNodeObj::from_key(self.nodes.clone(), self.root)
     }
 
-    pub fn register_behavior<B: WidgetBehavior>(&self, behavior: B) -> WidgetObj<B> {
-        WidgetObj::new(self.behaviors.insert(Box::new(behavior)))
+    pub fn register_behavior<B: WidgetBehavior + 'static>(&mut self, behavior: Arc<B>) {
+        self.behaviors.push(behavior);
     }
 
-    pub fn create_widget<W: Widget>(&mut self, parent: Obj<GuiNode>) -> W {
+    pub fn create_widget<W: Widget>(&mut self, parent: GuiNodeObj) -> W {
         let mut widget = W::new(self, parent);
         widget.apply_style(self.styles.query([W::class_name()]));
         widget

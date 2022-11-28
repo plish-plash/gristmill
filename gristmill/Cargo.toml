@@ -11,8 +11,7 @@ log = "0.4"
 env_logger = "0.9"
 serde = "1.0"
 ron = "0.8"
-downcast-rs = "1.2"
-slab = "0.4"
+slotmap = "1.0"
 glam = { version = "0.22", features = ["serde"] }
 palette = { version = "0.6", features = ["serializing"] }
 pareen = "0.3"

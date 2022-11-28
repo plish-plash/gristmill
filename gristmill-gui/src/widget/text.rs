@@ -1,13 +1,12 @@
 use crate::{
     widget::{StyleQuery, StyleValues, Widget},
-    Gui, GuiDraw, GuiLayout, GuiNode, GuiNodeExt,
+    Gui, GuiDraw, GuiLayout, GuiNode, GuiNodeExt, GuiNodeObj,
 };
 use glyph_brush::*;
 use gristmill::{
     color::Pixel,
     geom2d::{Rect, Size},
     math::IVec2,
-    Obj,
 };
 use serde::{Deserialize, Serialize};
 
@@ -70,7 +69,7 @@ impl Default for TextStyle {
 
 pub struct Text {
     style: TextStyle,
-    node: Obj<GuiNode>,
+    node: GuiNodeObj,
 }
 
 impl Text {
@@ -108,7 +107,7 @@ impl Widget for Text {
     fn class_name() -> &'static str {
         "Text"
     }
-    fn new(_gui: &mut Gui, parent: Obj<GuiNode>) -> Self {
+    fn new(_gui: &mut Gui, parent: GuiNodeObj) -> Self {
         let node = parent.add_child(GuiNode::with_draw_and_layout(
             GuiDraw::Text(OwnedSection::default()),
             GuiLayout::Child(Rect::new(IVec2::ZERO, Size::new(256, 32))),
@@ -124,7 +123,7 @@ impl Widget for Text {
         self.style.font_size = style.get("font-size", default.font_size);
         self.style.color = style.get("color", default.color);
     }
-    fn node(&self) -> Obj<GuiNode> {
-        self.node.clone()
+    fn node(&self) -> &GuiNodeObj {
+        &self.node
     }
 }

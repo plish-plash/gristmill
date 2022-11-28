@@ -1,219 +1,129 @@
-use downcast_rs::Downcast;
-use slab::Slab;
+pub use slotmap::*;
 use std::{
-    marker::PhantomData,
     ops::{Deref, DerefMut},
-    sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard},
+    sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
 };
 
-pub type ObjectsReadGuard<'a, T> = RwLockReadGuard<'a, Slab<T>>;
-pub type ObjectsWriteGuard<'a, T> = RwLockWriteGuard<'a, Slab<T>>;
-
-struct ObjectsInner<T> {
-    data: RwLock<Slab<T>>,
-    delete_queue: Mutex<Vec<usize>>,
+#[macro_export]
+macro_rules! new_object_type {
+    ($data_ty:ty, $key_ty:ident, $object_ty:ident, $collection_ty:ident) => {
+        $crate::object::new_key_type! { pub struct $key_ty; }
+        pub type $object_ty = $crate::object::Object<$key_ty, $data_ty>;
+        pub type $collection_ty =
+            std::sync::Arc<std::sync::RwLock<$crate::object::DenseSlotMap<$key_ty, $data_ty>>>;
+    };
 }
 
-pub struct Objects<T>(Arc<ObjectsInner<T>>);
-
-impl<T> Default for Objects<T> {
-    fn default() -> Self {
-        let inner = ObjectsInner {
-            data: RwLock::new(Slab::new()),
-            delete_queue: Mutex::new(Vec::new()),
-        };
-        Objects(Arc::new(inner))
-    }
+pub trait ObjectCollection {
+    type Key: Key;
+    type Value;
+    fn insert(&self, value: Self::Value) -> Object<Self::Key, Self::Value>;
+    fn remove(&self, object: Object<Self::Key, Self::Value>) -> Option<Self::Value>;
 }
 
-impl<T> Clone for Objects<T> {
-    fn clone(&self) -> Self {
-        Objects(self.0.clone())
-    }
-}
-
-impl<T> Objects<T> {
-    pub fn new() -> Self {
-        Default::default()
-    }
-
-    pub fn cleanup(&self) {
-        let mut write_guard = self
-            .0
-            .data
+impl<K: Key, V> ObjectCollection for Arc<RwLock<DenseSlotMap<K, V>>> {
+    type Key = K;
+    type Value = V;
+    fn insert(&self, value: Self::Value) -> Object<Self::Key, Self::Value> {
+        let key = self
             .try_write()
-            .expect("Objects::cleanup() not allowed here");
-        let mut delete = self.0.delete_queue.lock().unwrap();
-        for item in delete.drain(..) {
-            write_guard.remove(item);
+            .expect("ObjectCollection::insert() not allowed here")
+            .insert(value);
+        Object::from_key(self.clone(), key)
+    }
+    fn remove(&self, object: Object<Self::Key, Self::Value>) -> Option<Self::Value> {
+        self.try_write()
+            .expect("ObjectCollection::remove() not allowed here")
+            .remove(object.key())
+    }
+}
+
+pub struct ObjectReadGuard<'a, K: Key, V> {
+    read_guard: RwLockReadGuard<'a, DenseSlotMap<K, V>>,
+    key: K,
+}
+
+impl<'a, K: Key, V> Deref for ObjectReadGuard<'a, K, V> {
+    type Target = V;
+    fn deref(&self) -> &V {
+        self.read_guard.get(self.key).expect("object removed")
+    }
+}
+
+pub struct ObjectWriteGuard<'a, K: Key, V> {
+    write_guard: RwLockWriteGuard<'a, DenseSlotMap<K, V>>,
+    key: K,
+}
+
+impl<'a, K: Key, V> Deref for ObjectWriteGuard<'a, K, V> {
+    type Target = V;
+    fn deref(&self) -> &V {
+        self.write_guard.get(self.key).expect("object removed")
+    }
+}
+impl<'a, K: Key, V> DerefMut for ObjectWriteGuard<'a, K, V> {
+    fn deref_mut(&mut self) -> &mut V {
+        self.write_guard.get_mut(self.key).expect("object removed")
+    }
+}
+
+pub struct Object<K: Key, V> {
+    objects: Arc<RwLock<DenseSlotMap<K, V>>>,
+    key: K,
+}
+
+impl<K: Key, V> Clone for Object<K, V> {
+    fn clone(&self) -> Self {
+        Object {
+            objects: self.objects.clone(),
+            key: self.key,
         }
     }
-    pub fn insert(&self, object: T) -> Obj<T> {
-        let mut write_guard = self
-            .0
-            .data
-            .try_write()
-            .expect("Objects::insert() not allowed here");
-        let key = write_guard.insert(object);
-        Obj(Arc::new(ObjInner {
-            objects: self.clone(),
-            key,
-        }))
-    }
-
-    pub fn read(&self) -> ObjectsReadGuard<T> {
-        self.0
-            .data
-            .try_read()
-            .expect("Objects::read() not allowed here")
-    }
-    pub fn write(&self) -> ObjectsWriteGuard<T> {
-        self.0
-            .data
-            .try_write()
-            .expect("Objects::write() not allowed here")
-    }
 }
 
-struct ObjInner<T> {
-    objects: Objects<T>,
-    key: usize,
-}
-
-impl<T> Drop for ObjInner<T> {
-    fn drop(&mut self) {
-        let mut delete_queue = self.objects.0.delete_queue.lock().unwrap();
-        delete_queue.push(self.key);
-    }
-}
-
-pub struct ObjReadGuard<'a, T> {
-    read_guard: ObjectsReadGuard<'a, T>,
-    key: usize,
-}
-
-impl<'a, T> Deref for ObjReadGuard<'a, T> {
-    type Target = T;
-    fn deref(&self) -> &T {
-        self.read_guard.get(self.key).expect("missing object")
-    }
-}
-
-pub struct ObjWriteGuard<'a, T> {
-    write_guard: ObjectsWriteGuard<'a, T>,
-    key: usize,
-}
-
-impl<'a, T> Deref for ObjWriteGuard<'a, T> {
-    type Target = T;
-    fn deref(&self) -> &T {
-        self.write_guard.get(self.key).expect("missing object")
-    }
-}
-impl<'a, T> DerefMut for ObjWriteGuard<'a, T> {
-    fn deref_mut(&mut self) -> &mut T {
-        self.write_guard.get_mut(self.key).expect("missing object")
-    }
-}
-
-pub struct Obj<T>(Arc<ObjInner<T>>);
-
-impl<T> Clone for Obj<T> {
-    fn clone(&self) -> Self {
-        Obj(self.0.clone())
-    }
-}
-
-impl<T> PartialEq for Obj<T> {
+impl<K: Key, V> PartialEq for Object<K, V> {
     fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
+        Arc::ptr_eq(&self.objects, &other.objects) && self.key == other.key
     }
 }
-impl<T> Eq for Obj<T> {}
+impl<K: Key, V> Eq for Object<K, V> {}
 
-impl<T> Obj<T> {
-    pub fn objects(&self) -> Objects<T> {
-        self.0.objects.clone()
+impl<K: Key, V> Object<K, V> {
+    pub fn from_key(objects: Arc<RwLock<DenseSlotMap<K, V>>>, key: K) -> Self {
+        Object { objects, key }
     }
-    pub fn read(&self) -> ObjReadGuard<T> {
+    pub fn key(&self) -> K {
+        self.key
+    }
+
+    pub fn objects(&self) -> &Arc<RwLock<DenseSlotMap<K, V>>> {
+        &self.objects
+    }
+    pub fn exists(&self) -> bool {
         let read_guard = self
-            .0
             .objects
-            .0
-            .data
             .try_read()
-            .expect("Obj::read() not allowed here");
-        ObjReadGuard {
-            read_guard,
-            key: self.0.key,
-        }
+            .expect("Object::exists() not allowed here");
+        read_guard.contains_key(self.key)
     }
-    pub fn write(&self) -> ObjWriteGuard<T> {
-        let write_guard = self
-            .0
+    pub fn read(&self) -> ObjectReadGuard<K, V> {
+        let read_guard = self
             .objects
-            .0
-            .data
+            .try_read()
+            .expect("Object::read() not allowed here");
+        ObjectReadGuard {
+            read_guard,
+            key: self.key,
+        }
+    }
+    pub fn write(&self) -> ObjectWriteGuard<K, V> {
+        let write_guard = self
+            .objects
             .try_write()
-            .expect("Obj::write() not allowed here");
-        ObjWriteGuard {
+            .expect("Object::write() not allowed here");
+        ObjectWriteGuard {
             write_guard,
-            key: self.0.key,
-        }
-    }
-}
-
-pub struct CastObjReadGuard<'a, T: ?Sized, D> {
-    _marker: PhantomData<D>,
-    read_guard: ObjReadGuard<'a, Box<T>>,
-}
-
-impl<'a, T: Downcast + ?Sized, D: 'static> Deref for CastObjReadGuard<'a, T, D> {
-    type Target = D;
-    fn deref(&self) -> &D {
-        let base: &T = self.read_guard.deref();
-        base.as_any().downcast_ref().expect("wrong type")
-    }
-}
-
-pub struct CastObjWriteGuard<'a, T: ?Sized, D> {
-    _marker: PhantomData<D>,
-    write_guard: ObjWriteGuard<'a, Box<T>>,
-}
-
-impl<'a, T: Downcast + ?Sized, D: 'static> Deref for CastObjWriteGuard<'a, T, D> {
-    type Target = D;
-    fn deref(&self) -> &D {
-        let base: &T = self.write_guard.deref();
-        base.as_any().downcast_ref().expect("wrong type")
-    }
-}
-impl<'a, T: Downcast + ?Sized, D: 'static> DerefMut for CastObjWriteGuard<'a, T, D> {
-    fn deref_mut(&mut self) -> &mut D {
-        let base: &mut T = self.write_guard.deref_mut();
-        base.as_any_mut().downcast_mut().expect("wrong type")
-    }
-}
-
-pub struct CastObj<T: ?Sized, D>(Obj<Box<T>>, PhantomData<D>);
-
-impl<T: Downcast + ?Sized, D> CastObj<T, D> {
-    pub fn new(inner: Obj<Box<T>>) -> Self {
-        CastObj(inner, PhantomData)
-    }
-    pub fn objects(&self) -> Objects<Box<T>> {
-        self.0.objects()
-    }
-    pub fn read(&self) -> CastObjReadGuard<T, D> {
-        CastObjReadGuard {
-            _marker: PhantomData,
-            read_guard: self.0.read(),
-        }
-    }
-    pub fn write(&self) -> CastObjWriteGuard<T, D> {
-        CastObjWriteGuard {
-            _marker: PhantomData,
-            write_guard: self.0.write(),
+            key: self.key,
         }
     }
 }

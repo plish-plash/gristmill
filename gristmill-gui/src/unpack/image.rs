@@ -1,11 +1,9 @@
-use gristmill::Obj;
-use serde::{Deserialize, Serialize};
-
 use super::{PackedWidget, Unpacker};
 use crate::{
     widget::{Image, Widget},
-    Gui, GuiLayout, GuiNode,
+    Gui, GuiLayout, GuiNodeObj,
 };
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct PackedImage<W: PackedWidget> {
@@ -17,7 +15,7 @@ pub struct PackedImage<W: PackedWidget> {
 }
 
 impl<W: PackedWidget> PackedWidget for PackedImage<W> {
-    fn unpack(&self, unpacker: &mut Unpacker, gui: &mut Gui, parent: Obj<GuiNode>) -> Obj<GuiNode> {
+    fn unpack(&self, unpacker: &mut Unpacker, gui: &mut Gui, parent: GuiNodeObj) -> GuiNodeObj {
         let image: Image = gui.create_widget(parent);
         unpacker.unpack_children(gui, image.node(), &self.children);
         unpacker.finish_widget(image, &self.name, &self.layout)

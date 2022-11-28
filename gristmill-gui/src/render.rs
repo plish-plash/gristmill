@@ -110,48 +110,39 @@ impl GuiRenderer {
             glyph_texture,
         }
     }
-
-    fn pixel_rect_to_viewport(rect: [f32; 4], viewport_extents: (f32, f32)) -> [f32; 4] {
-        [
-            (rect[0] / viewport_extents.0) - 1.0,
-            (rect[1] / viewport_extents.1) - 1.0,
-            rect[2] / viewport_extents.0,
-            rect[3] / viewport_extents.1,
-        ]
+    pub fn rect_renderer(&self) -> &TextureRectRenderer {
+        &self.rect_renderer
     }
+
     fn rect_vertex(
         viewport_extents: (f32, f32),
-        (rect, depth): (Rect, u32),
+        (rect, z): (Rect, u32),
         color: gristmill::Color,
     ) -> Instance {
         Instance {
-            rect: Self::pixel_rect_to_viewport(
-                [
-                    rect.position.x as f32,
-                    rect.position.y as f32,
-                    rect.size.width as f32,
-                    rect.size.height as f32,
-                ],
-                viewport_extents,
-            ),
+            rect: [
+                rect.position.x as f32,
+                rect.position.y as f32,
+                rect.size.width as f32,
+                rect.size.height as f32,
+            ],
             uv_rect: [0.0, 0.0, 1.0, 1.0],
             color: color.into_raw(),
-            depth: 1.0 - (depth as f32 / 1024.0),
+            z: 1.0 - (z as f32 / 1024.0),
         }
+        .transform_to_viewport(viewport_extents)
     }
     fn glyph_vertex(viewport_extents: (f32, f32), glyph: GlyphVertex) -> Instance {
         fn f32_array_from(rect: ab_glyph::Rect) -> [f32; 4] {
             [rect.min.x, rect.min.y, rect.width(), rect.height()]
         }
         Instance {
-            rect: Self::pixel_rect_to_viewport(
-                f32_array_from(glyph.pixel_coords),
-                viewport_extents,
-            ),
+            rect: f32_array_from(glyph.pixel_coords),
             uv_rect: f32_array_from(glyph.tex_coords),
             color: glyph.extra.color,
-            depth: 1.0 - (glyph.extra.z / 1024.0),
+            z: 1.0 - (glyph.extra.z / 1024.0),
         }
+        .transform_to_viewport(viewport_extents)
     }
     fn update_glyph_texture(
         context: &mut RenderContext,
@@ -182,8 +173,8 @@ impl GuiRenderer {
             gui.viewport.size.height as f32 / 2.0,
         );
 
-        for (_, node) in gui.nodes.read().iter() {
-            if !node.visible.get() {
+        for (_, node) in gui.nodes.read().unwrap().iter() {
+            if !node.visible {
                 continue;
             }
             match &node.draw {

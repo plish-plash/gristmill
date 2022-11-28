@@ -8,9 +8,8 @@ pub use text::*;
 
 use crate::{
     widget::{Panel, Widget},
-    Gui, GuiLayout, GuiNode, GuiNodeExt,
+    Gui, GuiLayout, GuiNode, GuiNodeExt, GuiNodeObj,
 };
-use gristmill::Obj;
 use serde::{Deserialize, Serialize};
 use std::{any::Any, collections::HashMap};
 
@@ -53,7 +52,7 @@ impl Unpacker {
         items
     }
 
-    pub fn unpack_children<P>(&mut self, gui: &mut Gui, node: Obj<GuiNode>, children: &[P])
+    pub fn unpack_children<P>(&mut self, gui: &mut Gui, node: &GuiNodeObj, children: &[P])
     where
         P: PackedWidget,
     {
@@ -66,14 +65,14 @@ impl Unpacker {
         widget: W,
         name: &Option<String>,
         layout: &Option<GuiLayout>,
-    ) -> Obj<GuiNode>
+    ) -> GuiNodeObj
     where
         W: Widget + 'static,
     {
         if let Some(l) = *layout {
             widget.set_layout(l);
         }
-        let node = widget.node();
+        let node = widget.node().clone();
         if let Some(name) = name.as_deref() {
             self.add(name, widget);
         }
@@ -82,16 +81,11 @@ impl Unpacker {
 }
 
 pub trait PackedWidget {
-    fn unpack(&self, unpacker: &mut Unpacker, gui: &mut Gui, parent: Obj<GuiNode>) -> Obj<GuiNode>;
+    fn unpack(&self, unpacker: &mut Unpacker, gui: &mut Gui, parent: GuiNodeObj) -> GuiNodeObj;
 }
 
 impl PackedWidget for () {
-    fn unpack(
-        &self,
-        _unpacker: &mut Unpacker,
-        _gui: &mut Gui,
-        _parent: Obj<GuiNode>,
-    ) -> Obj<GuiNode> {
+    fn unpack(&self, _unpacker: &mut Unpacker, _gui: &mut Gui, _parent: GuiNodeObj) -> GuiNodeObj {
         panic!("unpacking nonexistent node");
     }
 }
@@ -103,9 +97,9 @@ pub struct PackedNode<W: PackedWidget> {
 }
 
 impl<W: PackedWidget> PackedWidget for PackedNode<W> {
-    fn unpack(&self, unpacker: &mut Unpacker, gui: &mut Gui, parent: Obj<GuiNode>) -> Obj<GuiNode> {
+    fn unpack(&self, unpacker: &mut Unpacker, gui: &mut Gui, parent: GuiNodeObj) -> GuiNodeObj {
         let node = parent.add_child(GuiNode::with_layout(self.layout));
-        unpacker.unpack_children(gui, node.clone(), &self.children);
+        unpacker.unpack_children(gui, &node, &self.children);
         node
     }
 }
@@ -119,7 +113,7 @@ pub struct PackedPanel<W: PackedWidget> {
 }
 
 impl<W: PackedWidget> PackedWidget for PackedPanel<W> {
-    fn unpack(&self, unpacker: &mut Unpacker, gui: &mut Gui, parent: Obj<GuiNode>) -> Obj<GuiNode> {
+    fn unpack(&self, unpacker: &mut Unpacker, gui: &mut Gui, parent: GuiNodeObj) -> GuiNodeObj {
         let panel: Panel = gui.create_widget(parent);
         unpacker.unpack_children(gui, panel.node(), &self.children);
         unpacker.finish_widget(panel, &self.name, &self.layout)
@@ -127,8 +121,8 @@ impl<W: PackedWidget> PackedWidget for PackedPanel<W> {
 }
 
 pub trait WidgetCollection: Sized {
-    fn from_unpacked_widgets(root: Obj<GuiNode>, unpacker: Unpacker) -> Self;
-    fn unpack<W: PackedWidget>(gui: &mut Gui, parent: Obj<GuiNode>, packed_widget: W) -> Self {
+    fn from_unpacked_widgets(root: GuiNodeObj, unpacker: Unpacker) -> Self;
+    fn unpack<W: PackedWidget>(gui: &mut Gui, parent: GuiNodeObj, packed_widget: W) -> Self {
         let mut unpacker = Unpacker(HashMap::new());
         let root = packed_widget.unpack(&mut unpacker, gui, parent);
         Self::from_unpacked_widgets(root, unpacker)
