@@ -121,7 +121,7 @@ pub struct GuiNode {
     pub draw: GuiDraw,
     pub offset: Rect,
     rect: Rect,
-    z: u32,
+    z: u16,
     visible: bool,
     children: Vec<GuiNodeKey>,
 }
@@ -153,7 +153,7 @@ impl GuiNode {
         }
     }
 
-    fn draw_rect(&self) -> (Rect, u32) {
+    fn draw_rect(&self) -> (Rect, u16) {
         let mut rect = self.rect;
         rect.position += self.offset.position;
         rect.size += self.offset.size;
@@ -226,7 +226,8 @@ impl Gui {
         for (_, node) in write_guard.iter_mut() {
             node.visible = false;
         }
-        Self::layout_children(&mut write_guard, self.root, self.viewport, true, 1);
+        let root_z = write_guard.get(self.root).unwrap().z;
+        Self::layout_children(&mut write_guard, self.root, self.viewport, true, root_z + 1);
 
         // Find the node the pointer is over.
         fn check_pointer_over(
@@ -269,7 +270,7 @@ impl Gui {
         node: GuiNodeKey,
         parent_rect: Rect,
         parent_visible: bool,
-        z: u32,
+        z: u16,
     ) {
         let mut previous_rect = None;
         let children = nodes.get(node).unwrap().children.clone();
@@ -291,6 +292,9 @@ impl Gui {
 
     pub fn root(&self) -> GuiNodeObj {
         GuiNodeObj::from_key(self.nodes.clone(), self.root)
+    }
+    pub fn set_root_z(&self, z: u16) {
+        self.root().write().z = z;
     }
 
     pub fn register_behavior<B: WidgetBehavior + 'static>(&mut self, behavior: Arc<B>) {

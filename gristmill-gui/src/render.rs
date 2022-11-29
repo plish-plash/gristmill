@@ -6,7 +6,7 @@ use gristmill::{
     math::IVec2,
     render::{
         texture::Texture,
-        texture_rect::{Instance, TextureRectPipeline, TextureRectRenderer},
+        texture_rect::{TextureRect, TextureRectRenderer},
         RenderContext,
     },
 };
@@ -52,16 +52,13 @@ fn rect_glyph_to_texture(rect: Rectangle<u32>) -> Rect {
 
 pub struct GuiRenderer {
     rect_renderer: TextureRectRenderer,
-    glyph_brush: GlyphBrush<Instance>,
+    glyph_brush: GlyphBrush<TextureRect>,
     glyph_texture: Texture,
+    glyph_draw: Vec<TextureRect>,
 }
 
 impl GuiRenderer {
-    fn create_glyph_texture(
-        context: &mut RenderContext,
-        rect_renderer: &mut TextureRectRenderer,
-        dimensions: Size,
-    ) -> Texture {
+    fn create_glyph_texture(context: &mut RenderContext, dimensions: Size) -> Texture {
         let image = StorageImage::with_usage(
             context.allocator(),
             dimensions.into(),
@@ -84,65 +81,39 @@ impl GuiRenderer {
         };
         let image_view: Arc<dyn ImageViewAbstract> = ImageView::new(image, image_info).unwrap();
         let texture: Texture = image_view.into();
-        rect_renderer.set_retain_instances(context, texture.clone(), true);
         texture
     }
     pub fn new(context: &mut RenderContext) -> Self {
-        let mut rect_renderer = TextureRectRenderer::new(
-            TextureRectPipeline::new(context),
-            context.allocator().clone(),
-        );
-
         let font =
             ab_glyph::FontArc::try_from_slice(include_bytes!("./OpenSans-Regular.ttf")).unwrap();
         let glyph_brush = GlyphBrushBuilder::using_font(font)
             .multithread(false)
             .build();
-        let glyph_texture = Self::create_glyph_texture(
-            context,
-            &mut rect_renderer,
-            glyph_brush.texture_dimensions().into(),
-        );
+        let glyph_texture =
+            Self::create_glyph_texture(context, glyph_brush.texture_dimensions().into());
 
         GuiRenderer {
-            rect_renderer,
+            rect_renderer: TextureRectRenderer::new(context),
             glyph_brush,
             glyph_texture,
+            glyph_draw: Vec::new(),
         }
     }
-    pub fn rect_renderer(&self) -> &TextureRectRenderer {
-        &self.rect_renderer
+    pub fn rect_renderer(&mut self) -> &mut TextureRectRenderer {
+        &mut self.rect_renderer
     }
 
-    fn rect_vertex(
-        viewport_extents: (f32, f32),
-        (rect, z): (Rect, u32),
-        color: gristmill::Color,
-    ) -> Instance {
-        Instance {
-            rect: [
-                rect.position.x as f32,
-                rect.position.y as f32,
-                rect.size.width as f32,
-                rect.size.height as f32,
-            ],
-            uv_rect: [0.0, 0.0, 1.0, 1.0],
-            color: color.into_raw(),
-            z: 1.0 - (z as f32 / 1024.0),
-        }
-        .transform_to_viewport(viewport_extents)
-    }
-    fn glyph_vertex(viewport_extents: (f32, f32), glyph: GlyphVertex) -> Instance {
+    fn glyph_vertex(glyph_texture: &Texture, glyph: GlyphVertex) -> TextureRect {
         fn f32_array_from(rect: ab_glyph::Rect) -> [f32; 4] {
             [rect.min.x, rect.min.y, rect.width(), rect.height()]
         }
-        Instance {
+        TextureRect {
+            texture: Some(glyph_texture.clone()),
             rect: f32_array_from(glyph.pixel_coords),
             uv_rect: f32_array_from(glyph.tex_coords),
             color: glyph.extra.color,
-            z: 1.0 - (glyph.extra.z / 1024.0),
+            z: glyph.extra.z as u16,
         }
-        .transform_to_viewport(viewport_extents)
     }
     fn update_glyph_texture(
         context: &mut RenderContext,
@@ -168,10 +139,6 @@ impl GuiRenderer {
     }
     pub fn process(&mut self, context: &mut RenderContext, gui: &mut Gui) {
         gui.viewport = context.viewport();
-        let viewport_extents = (
-            gui.viewport.size.width as f32 / 2.0,
-            gui.viewport.size.height as f32 / 2.0,
-        );
 
         for (_, node) in gui.nodes.read().unwrap().iter() {
             if !node.visible {
@@ -180,24 +147,28 @@ impl GuiRenderer {
             match &node.draw {
                 GuiDraw::None => (),
                 GuiDraw::Rect(texture, color) => {
-                    let texture = texture
-                        .as_ref()
-                        .unwrap_or_else(|| &self.rect_renderer.pipeline().none_texture)
-                        .clone();
-                    self.rect_renderer.queue(
-                        context,
-                        texture,
-                        Self::rect_vertex(viewport_extents, node.draw_rect(), *color),
-                    );
+                    let (rect, z) = node.draw_rect();
+                    self.rect_renderer.queue(TextureRect {
+                        texture: texture.clone(),
+                        rect: [
+                            rect.position.x as f32,
+                            rect.position.y as f32,
+                            rect.size.width as f32,
+                            rect.size.height as f32,
+                        ],
+                        uv_rect: [0.0, 0.0, 1.0, 1.0],
+                        color: color.into_raw(),
+                        z,
+                    });
                 }
                 GuiDraw::Text(owned_section) => {
-                    let (rect, depth) = node.draw_rect();
+                    let (rect, z) = node.draw_rect();
                     let mut section = owned_section.to_borrowed();
                     section.screen_position =
                         text_screen_position(rect, section.layout).as_vec2().into();
                     section.bounds = rect.size.as_vec2().into();
                     for text in section.text.iter_mut() {
-                        text.extra.z = depth as f32;
+                        text.extra.z = z as f32;
                     }
                     self.glyph_brush.queue(section);
                 }
@@ -216,7 +187,7 @@ impl GuiRenderer {
                         tex_data,
                     )
                 },
-                |glyph| Self::glyph_vertex(viewport_extents, glyph),
+                |glyph| Self::glyph_vertex(&self.glyph_texture, glyph),
             );
             // If the cache texture is too small to fit all the glyphs, resize and try again.
             match brush_action {
@@ -225,8 +196,7 @@ impl GuiRenderer {
                     let dimensions = suggested.into();
                     log::debug!("Resizing glyph texture to {}", dimensions);
                     self.rect_renderer.remove(&self.glyph_texture);
-                    self.glyph_texture =
-                        Self::create_glyph_texture(context, &mut self.rect_renderer, dimensions);
+                    self.glyph_texture = Self::create_glyph_texture(context, dimensions);
                     self.glyph_brush
                         .resize_texture(dimensions.width, dimensions.height);
                 }
@@ -234,19 +204,14 @@ impl GuiRenderer {
         }
         // If the text has changed from what was last drawn, upload the new vertices to GPU.
         match brush_action.unwrap() {
-            BrushAction::Draw(vertices) => {
-                self.rect_renderer
-                    .queue_all(context, self.glyph_texture.clone(), vertices)
-            }
+            BrushAction::Draw(vertices) => self.glyph_draw = vertices,
             BrushAction::ReDraw => (),
         }
+        self.rect_renderer
+            .queue_all(self.glyph_draw.iter().cloned());
     }
 
     pub fn draw_all(&mut self, context: &mut RenderContext) {
-        self.rect_renderer.draw_all(
-            context,
-            self.rect_renderer.pipeline().vertex_buffer.clone(),
-            4,
-        );
+        self.rect_renderer.draw_all(context);
     }
 }

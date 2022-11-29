@@ -4,7 +4,7 @@ use std::{collections::HashMap, hash::Hash, sync::Arc};
 use vulkano::{
     format::Format,
     image::view::{ImageView, ImageViewCreateInfo},
-    image::{ImageAccess, ImageViewAbstract, ImmutableImage, MipmapsCount},
+    image::{ImageAccess, ImageDimensions, ImageViewAbstract, ImmutableImage, MipmapsCount},
     sampler::{ComponentMapping, ComponentSwizzle},
 };
 
@@ -18,6 +18,13 @@ impl Texture {
     }
     pub fn image_view(&self) -> &Arc<dyn ImageViewAbstract> {
         &self.0
+    }
+    pub fn dimensions(&self) -> Size {
+        if let ImageDimensions::Dim2d { width, height, .. } = self.0.dimensions() {
+            Size { width, height }
+        } else {
+            panic!("Texture is not 2D");
+        }
     }
 
     fn format_info(image: &DynamicImage) -> (Format, ComponentMapping) {
@@ -104,7 +111,6 @@ impl PartialEq for Texture {
         PartialEq::eq(&self.0, &other.0)
     }
 }
-
 impl Eq for Texture {}
 
 pub struct TextureStorage {

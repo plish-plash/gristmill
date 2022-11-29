@@ -4,7 +4,7 @@ pub use image::{DynamicImage, ImageBuffer};
 
 impl Asset for DynamicImage {
     fn read_from(reader: BufReader) -> AssetResult<Self> {
-        Reader::new(reader).decode().map_err(Into::into)
+        Ok(Reader::new(reader).with_guessed_format()?.decode()?)
     }
 }
 impl From<ImageError> for AssetError {

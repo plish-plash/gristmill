@@ -1,4 +1,3 @@
-pub mod material;
 pub mod texture;
 pub mod texture_rect;
 
