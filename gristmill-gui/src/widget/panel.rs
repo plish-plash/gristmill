@@ -1,19 +1,19 @@
 use crate::{
     widget::{Widget, WidgetInput},
-    Gui, GuiDraw, GuiLayout, GuiNode, GuiNodeExt, GuiNodeObj, WidgetBehavior,
+    Gui, GuiDraw, GuiLayout, GuiNode, GuiNodeExt, GuiNodeObj, WidgetState,
 };
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
-struct PanelBehavior(GuiNodeObj);
+struct PanelState(GuiNodeObj);
 
-impl WidgetBehavior for PanelBehavior {
-    fn update(&self, _input: WidgetInput) {
+impl WidgetState for PanelState {
+    fn update(&mut self, _input: WidgetInput) {
         // Changes to flags don't propagate until next frame.
         self.0.write().flags.visible = false;
     }
 }
 
-pub struct Panel(GuiNodeObj, Arc<PanelBehavior>);
+pub struct Panel(GuiNodeObj, Arc<RwLock<PanelState>>);
 
 impl Panel {
     pub fn show(&self) {
@@ -26,16 +26,15 @@ impl Panel {
 
 impl Widget for Panel {
     fn class_name() -> &'static str {
-        "Panel"
+        "panel"
     }
     fn new(gui: &mut Gui, parent: GuiNodeObj) -> Self {
         let node = parent.add_child(GuiNode {
             layout: GuiLayout::fill(),
             ..Default::default()
         });
-        let behavior = Arc::new(PanelBehavior(node.clone()));
-        gui.register_behavior(behavior.clone());
-        Panel(node, behavior)
+        let state = gui.register_widget_state(PanelState(node.clone()));
+        Panel(node, state)
     }
     fn node(&self) -> &GuiNodeObj {
         &self.0

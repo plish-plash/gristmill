@@ -19,7 +19,10 @@ impl InputState {
         match self {
             InputState::Button(b) => b,
             InputState::Axis1(v) => v.abs() >= 0.5,
-            InputState::Axis2(_) => panic!("axis2 input can't be bound to button action"),
+            InputState::Axis2(_) => {
+                log::error!("Axis2 input can't be bound to Button action.");
+                false
+            }
         }
     }
     fn as_axis1(self) -> f32 {
@@ -32,12 +35,18 @@ impl InputState {
                 }
             }
             InputState::Axis1(v) => v,
-            InputState::Axis2(_) => panic!("axis2 input can't be bound to axis1 action"),
+            InputState::Axis2(_) => {
+                log::error!("Axis2 input can't be bound to Axis1 action.");
+                0.0
+            }
         }
     }
     fn as_axis2(self) -> Vec2 {
         match self {
-            InputState::Button(_) => panic!("button input can't be bound to axis2 action"),
+            InputState::Button(_) => {
+                log::error!("Button input can't be bound to Axis2 action.");
+                Vec2::ZERO
+            }
             InputState::Axis1(v) => Vec2 { x: v, y: 0.0 },
             InputState::Axis2(v) => v,
         }
@@ -107,8 +116,16 @@ impl InputActions {
             }
         }
     }
-    pub fn get(&self, key: &str) -> &ActionState {
-        self.0.get(key).expect("action not bound")
+    pub fn try_get(&self, key: &str) -> Option<&ActionState> {
+        self.0.get(key)
+    }
+    pub fn get(&self, key: &str) -> Option<&ActionState> {
+        if let Some(state) = self.0.get(key) {
+            Some(state)
+        } else {
+            log::error!("Input action \"{}\" not bound.", key);
+            None
+        }
     }
 }
 
@@ -369,7 +386,7 @@ impl Binding for BindingEnum {
 
 #[derive(Default, Clone, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct InputBindings(Vec<(String, BindingEnum)>);
+pub struct InputBindings(HashMap<String, BindingEnum>);
 
 impl InputBindings {
     fn create_actions(&self) -> InputActions {
@@ -386,35 +403,35 @@ impl InputBindings {
     }
 
     pub fn add_key(&mut self, key: &str, binding: KeyBinding) {
-        self.0.push((key.to_owned(), BindingEnum::Key(binding)));
+        self.0.insert(key.to_owned(), BindingEnum::Key(binding));
     }
     pub fn add_key_axis1(&mut self, key: &str, binding: KeyAxis1Binding) {
         self.0
-            .push((key.to_owned(), BindingEnum::KeyAxis1(binding)));
+            .insert(key.to_owned(), BindingEnum::KeyAxis1(binding));
     }
     pub fn add_key_axis2(&mut self, key: &str, binding: KeyAxis2Binding) {
         self.0
-            .push((key.to_owned(), BindingEnum::KeyAxis2(binding)));
+            .insert(key.to_owned(), BindingEnum::KeyAxis2(binding));
     }
     pub fn add_mouse_button(&mut self, key: &str, binding: MouseButtonBinding) {
         self.0
-            .push((key.to_owned(), BindingEnum::MouseButton(binding)));
+            .insert(key.to_owned(), BindingEnum::MouseButton(binding));
     }
     pub fn add_mouse_motion(&mut self, key: &str, binding: MouseMotionBinding) {
         self.0
-            .push((key.to_owned(), BindingEnum::MouseMotion(binding)));
+            .insert(key.to_owned(), BindingEnum::MouseMotion(binding));
     }
 }
 
 impl Asset for InputBindings {
     fn read_from(reader: BufReader) -> AssetResult<Self> {
-        crate::asset::util::read_ron(reader)
+        crate::asset::util::read_yaml(reader)
     }
 }
 
 impl AssetWrite for InputBindings {
     fn write_to(value: &Self, writer: BufWriter) -> AssetResult<()> {
-        crate::asset::util::write_ron(writer, value)
+        crate::asset::util::write_yaml(writer, value)
     }
 }
 

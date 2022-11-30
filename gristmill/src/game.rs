@@ -16,11 +16,25 @@ use crate::{
     render::RenderContext,
 };
 
-pub trait Game: Sized + 'static {
-    fn load(config: AssetStorage, context: &mut RenderContext) -> Self;
+pub trait GameRenderer {
+    fn new(context: &mut RenderContext) -> Self;
+}
+
+impl<T1, T2> GameRenderer for (T1, T2)
+where
+    T1: GameRenderer,
+    T2: GameRenderer,
+{
+    fn new(context: &mut RenderContext) -> Self {
+        (T1::new(context), T2::new(context))
+    }
+}
+
+pub trait Game: 'static {
+    type Renderer: GameRenderer;
     fn resize(&mut self, _dimensions: Size) {}
-    fn update(&mut self, window: &mut GameWindow, input: &InputActions, delta: f64);
-    fn render(&mut self, context: &mut RenderContext);
+    fn update(&mut self, window: &mut GameWindow, input: &InputActions, delta: f64) -> Option<()>;
+    fn render(&mut self, context: &mut RenderContext, renderer: &mut Self::Renderer);
 }
 
 pub struct GameWindow<'a> {
@@ -52,20 +66,13 @@ impl<'a> GameWindow<'a> {
 }
 
 struct GameLoop<G: Game> {
-    context: RenderContext,
     game: G,
+    renderer: G::Renderer,
+    context: RenderContext,
     input_system: InputSystem,
 }
 
 impl<G: Game> GameLoop<G> {
-    pub fn new(context: RenderContext, game: G, input_system: InputSystem) -> Self {
-        GameLoop {
-            context,
-            game,
-            input_system,
-        }
-    }
-
     fn update(&mut self, delta: f64) -> bool {
         let mut window = GameWindow::new(self.context.window());
         self.input_system.start_frame();
@@ -86,7 +93,7 @@ impl<G: Game> GameLoop<G> {
         }
     }
     fn render(&mut self) {
-        self.context.render(&mut self.game);
+        self.context.render(&mut self.game, &mut self.renderer);
     }
 
     fn start(mut self, event_loop: EventLoop<()>) -> ! {
@@ -136,25 +143,38 @@ fn default_controls() -> InputBindings {
     let mut controls = InputBindings::default();
     controls.add_mouse_button("primary", MouseButtonBinding::new(MouseButton::Left));
     controls.add_mouse_button("secondary", MouseButtonBinding::new(MouseButton::Right));
-    controls.add_key("exit", KeyBinding::new(Key::Escape));
     controls.add_mouse_motion("look", MouseMotionBinding::new(0.1));
+    controls.add_key("console", KeyBinding::new(Key::Grave));
+    controls.add_key("exit", KeyBinding::new(Key::Escape));
     controls.add_key_axis2("move", KeyAxis2Binding::new(Key::W, Key::S, Key::A, Key::D));
     controls.add_key("jump", KeyBinding::new(Key::Space));
     controls.add_key_axis1("fly", KeyAxis1Binding::new(Key::Space, Key::LShift));
     controls
 }
 
-pub fn run_game<G: Game>() -> ! {
+pub fn run_game<G, F>(func: F) -> !
+where
+    G: Game,
+    F: FnOnce() -> G,
+{
     init_logging();
     log::info!("Starting up...");
+    let input_bindings = AssetStorage::config()
+        .load_or_save_default("controls.yaml", default_controls)
+        .unwrap_or_default();
+    let game = func();
+
     let event_loop = EventLoop::new();
     let mut context = RenderContext::create_window(&event_loop);
-
-    let mut config = AssetStorage::config();
-    let input_bindings = config.get_or_save("controls.ron", default_controls).clone();
-    let game = G::load(config, &mut context);
+    let renderer = G::Renderer::new(&mut context);
     context.finish_setup();
 
-    log::info!("Setup finished, entering main loop");
-    GameLoop::new(context, game, InputSystem::new(input_bindings)).start(event_loop)
+    log::info!("Setup finished, entering main loop.");
+    GameLoop {
+        game,
+        renderer,
+        context,
+        input_system: InputSystem::new(input_bindings),
+    }
+    .start(event_loop)
 }

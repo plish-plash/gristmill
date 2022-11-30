@@ -1,13 +1,14 @@
+use crate::widget::StyleValue;
 use crate::{
     widget::{Image, StyleQuery, StyleValues, Text, TextAlign, Widget, WidgetInput},
-    Gui, GuiDraw, GuiLayout, GuiNodeObj, WidgetBehavior,
+    Gui, GuiDraw, GuiLayout, GuiNodeObj, WidgetState,
 };
 use gristmill::{
     color::{IntoColor, LinLumaa},
-    geom2d::{Rect, Size},
+    geom2d::{IRect, Size},
+    render::texture::Texture,
     Color,
 };
-use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -24,53 +25,63 @@ impl Default for ButtonState {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-pub struct ButtonColors {
-    disabled: Color,
-    normal: Color,
-    hovered: Color,
-    pressed: Color,
+impl ButtonState {
+    pub fn is_active(self) -> bool {
+        self == ButtonState::Hovered || self == ButtonState::Pressed
+    }
 }
 
-impl Default for ButtonColors {
+struct ButtonDraw {
+    texture: Option<Texture>,
+    //animate_texture: bool,
+    pub disabled: Color,
+    pub normal: Color,
+    pub hovered: Color,
+    pub pressed: Color,
+}
+
+impl Default for ButtonDraw {
     fn default() -> Self {
-        ButtonColors {
+        ButtonDraw {
+            texture: None,
             disabled: LinLumaa::new(0.75, 0.5).into_color(),
             normal: LinLumaa::new(0.75, 1.0).into_color(),
-            hovered: LinLumaa::new(0.8, 1.0).into_color(),
-            pressed: LinLumaa::new(0.9, 1.0).into_color(),
+            hovered: LinLumaa::new(0.85, 1.0).into_color(),
+            pressed: LinLumaa::new(1.0, 1.0).into_color(),
         }
     }
 }
 
-impl ButtonColors {
-    fn get(&self, state: ButtonState) -> Color {
-        match state {
+impl ButtonDraw {
+    pub fn with_texture(texture: Texture) -> Self {
+        ButtonDraw {
+            texture: Some(texture),
+            ..Default::default()
+        }
+    }
+
+    fn draw(&self, state: ButtonState) -> GuiDraw {
+        let color = match state {
             ButtonState::Disabled => self.disabled,
             ButtonState::Normal => self.normal,
             ButtonState::Hovered => self.hovered,
             ButtonState::Pressed => self.pressed,
-        }
+        };
+        GuiDraw::Rect(self.texture.clone(), color)
     }
 }
 
-#[derive(Clone, Default)]
-struct ButtonBehaviorState {
-    button_state: ButtonState,
+struct ButtonWidgetState {
+    node: GuiNodeObj,
+    draw: ButtonDraw,
+    state: ButtonState,
     interactable: bool,
     just_released: bool,
 }
 
-struct ButtonBehavior {
-    node: GuiNodeObj,
-    colors: ButtonColors,
-    state: RwLock<ButtonBehaviorState>,
-}
-
-impl WidgetBehavior for ButtonBehavior {
-    fn update(&self, input: WidgetInput) {
-        let mut cur_state = self.state.read().unwrap().clone();
-        let button_state = if cur_state.interactable {
+impl WidgetState for ButtonWidgetState {
+    fn update(&mut self, input: WidgetInput) {
+        let new_state = if self.interactable {
             if input.pointer_over == Some(self.node.key()) {
                 if input.state.pressed() {
                     ButtonState::Pressed
@@ -83,35 +94,32 @@ impl WidgetBehavior for ButtonBehavior {
         } else {
             ButtonState::Disabled
         };
-        cur_state.interactable = false;
-        if button_state != cur_state.button_state {
-            cur_state.just_released = cur_state.button_state == ButtonState::Pressed
-                && button_state == ButtonState::Hovered;
-            cur_state.button_state = button_state;
-            if let GuiDraw::Rect(_, color) = &mut self.node.write().draw {
-                *color = self.colors.get(button_state);
-            }
+        self.interactable = false;
+        if new_state != self.state {
+            self.just_released =
+                self.state == ButtonState::Pressed && new_state == ButtonState::Hovered;
+            self.state = new_state;
+            self.node.write().draw = self.draw.draw(new_state);
         } else {
-            cur_state.just_released = false;
+            self.just_released = false;
         }
-        *self.state.write().unwrap() = cur_state;
     }
 }
 
 pub struct Button {
     node: GuiNodeObj,
-    behavior: Arc<ButtonBehavior>,
+    state: Arc<RwLock<ButtonWidgetState>>,
     label: Text,
 }
 
 impl Button {
     pub fn interact(&self) -> bool {
-        let mut write_guard = self.behavior.state.write().unwrap();
+        let mut write_guard = self.state.write().unwrap();
         write_guard.interactable = true;
         write_guard.just_released
     }
     pub fn state(&self) -> ButtonState {
-        self.behavior.state.read().unwrap().button_state
+        self.state.read().unwrap().state
     }
     pub fn set_label_string<S>(&self, text: S)
     where
@@ -122,14 +130,21 @@ impl Button {
 
     pub(crate) fn default_style() -> StyleValues {
         let mut style = StyleValues::new();
-        style.set("size", Size::new(128, 32));
+        style.insert(
+            "texture".to_owned(),
+            crate::widget::style::make_empty_texture(),
+        );
+        style.insert(
+            "size".to_owned(),
+            StyleValue::try_from(Size::new(128, 32)).unwrap(),
+        );
         style
     }
 }
 
 impl Widget for Button {
     fn class_name() -> &'static str {
-        "Button"
+        "button"
     }
     fn new(gui: &mut Gui, parent: GuiNodeObj) -> Self {
         let node = Image::new(gui, parent).node().clone();
@@ -137,21 +152,24 @@ impl Widget for Button {
         label.set_layout(GuiLayout::fill());
         label.set_align(TextAlign::Middle);
 
-        let behavior = Arc::new(ButtonBehavior {
+        let state = gui.register_widget_state(ButtonWidgetState {
             node: node.clone(),
-            colors: ButtonColors::default(),
-            state: RwLock::default(),
+            draw: ButtonDraw::default(),
+            state: ButtonState::Disabled,
+            interactable: false,
+            just_released: false,
         });
-        gui.register_behavior(behavior.clone());
-        Button {
-            node,
-            behavior,
-            label,
-        }
+        Button { node, state, label }
     }
     fn apply_style(&mut self, style: StyleQuery) {
-        self.node.write().layout =
-            GuiLayout::Child(Rect::from_size(style.get("size", Size::new(128, 32))));
+        if let Some(texture) = style.get_texture("texture") {
+            self.state.write().unwrap().draw = ButtonDraw::with_texture(texture);
+        }
+        let mut write_guard = self.node.write();
+        write_guard.layout = GuiLayout::Child(IRect::from_size(
+            style.get("size").unwrap_or(Size::new(128, 32)),
+        ));
+        write_guard.draw = self.state.read().unwrap().draw.draw(ButtonState::Disabled);
     }
     fn node(&self) -> &GuiNodeObj {
         &self.node

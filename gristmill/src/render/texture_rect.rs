@@ -1,9 +1,11 @@
 use crate::{
     geom2d::Rect,
     render::{texture::Texture, RenderContext},
+    Color, GameRenderer,
 };
 use bytemuck::{Pod, Zeroable};
 use image::{Rgba, RgbaImage};
+use palette::Pixel;
 use std::{cmp::Ordering, collections::HashMap, ptr::null, sync::Arc};
 use vulkano::{
     buffer::{BufferUsage, CpuBufferPool, DeviceLocalBuffer},
@@ -150,27 +152,24 @@ impl TextureRectPipeline {
 #[derive(Clone)]
 pub struct TextureRect {
     pub texture: Option<Texture>,
-    pub rect: [f32; 4],
-    pub uv_rect: [f32; 4],
-    pub color: [f32; 4],
+    pub rect: Rect,
+    pub uv_rect: Rect,
+    pub color: Color,
     pub z: u16,
 }
 
 impl TextureRect {
     fn draw(&self, viewport: Rect) -> Instance {
-        let viewport_extents = (
-            viewport.size.width as f32 / 2.0,
-            viewport.size.height as f32 / 2.0,
-        );
+        let viewport_extents = viewport.size / 2.0;
         Instance {
             rect: [
-                (self.rect[0] / viewport_extents.0) - 1.0,
-                (self.rect[1] / viewport_extents.1) - 1.0,
-                self.rect[2] / viewport_extents.0,
-                self.rect[3] / viewport_extents.1,
+                (self.rect.position.x / viewport_extents.x) - 1.0,
+                (self.rect.position.y / viewport_extents.y) - 1.0,
+                self.rect.size.x / viewport_extents.x,
+                self.rect.size.y / viewport_extents.y,
             ],
-            uv_rect: self.uv_rect,
-            color: self.color,
+            uv_rect: self.uv_rect.into(),
+            color: self.color.into_raw(),
         }
     }
 }
@@ -217,8 +216,8 @@ pub struct TextureRectRenderer {
     draw_queue: Vec<TextureRect>,
 }
 
-impl TextureRectRenderer {
-    pub fn new(context: &mut RenderContext) -> Self {
+impl GameRenderer for TextureRectRenderer {
+    fn new(context: &mut RenderContext) -> Self {
         TextureRectRenderer {
             pipeline: TextureRectPipeline::new(context),
             texture_descriptors: HashMap::new(),
@@ -234,7 +233,9 @@ impl TextureRectRenderer {
             draw_queue: Vec::new(),
         }
     }
+}
 
+impl TextureRectRenderer {
     pub fn remove(&mut self, texture: &Texture) {
         self.texture_descriptors.remove(texture);
     }

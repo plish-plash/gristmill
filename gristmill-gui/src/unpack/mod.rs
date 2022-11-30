@@ -10,46 +10,29 @@ use crate::{
     widget::{Panel, Widget},
     Gui, GuiLayout, GuiNode, GuiNodeExt, GuiNodeObj,
 };
+use gristmill::asset::{Asset, AssetResult, BufReader};
 use serde::{Deserialize, Serialize};
 use std::{any::Any, collections::HashMap};
 
-pub struct Unpacker(HashMap<String, Option<Box<dyn Any>>>);
+#[derive(Default)]
+pub struct Unpacker(HashMap<String, Box<dyn Any>>);
 
 impl Unpacker {
-    fn add<S, W>(&mut self, name: S, widget: W)
-    where
-        S: Into<String>,
-        W: Widget + 'static,
-    {
-        self.0.insert(name.into(), Some(Box::new(widget)));
-    }
-    pub fn named_widget<W>(&mut self, name: &str) -> W
+    pub fn get_widget<W>(&mut self, name: &str) -> Option<Box<W>>
     where
         W: Widget + 'static,
     {
-        *self
-            .0
-            .get_mut(name)
-            .expect("missing widget")
-            .take()
-            .expect("widget already taken")
-            .downcast()
-            .expect("widget wrong type")
-    }
-    pub fn named_widget_array<W>(&mut self, name: &str) -> Vec<W>
-    where
-        W: Widget + 'static,
-    {
-        let mut items = Vec::new();
-        loop {
-            let key = format!("{}[{}]", name, items.len());
-            if self.0.contains_key(&key) {
-                items.push(self.named_widget(&key));
+        if let Some(widget) = self.0.remove(name) {
+            if let Ok(cast) = widget.downcast() {
+                Some(cast)
             } else {
-                break;
+                log::error!("Widget {} is wrong type.", name);
+                None
             }
+        } else {
+            log::error!("No widget named {}.", name);
+            None
         }
-        items
     }
 
     pub fn unpack_children<P>(&mut self, gui: &mut Gui, node: &GuiNodeObj, children: &[P])
@@ -74,23 +57,17 @@ impl Unpacker {
         }
         let node = widget.node().clone();
         if let Some(name) = name.as_deref() {
-            self.add(name, widget);
+            self.0.insert(name.to_owned(), Box::new(widget));
         }
         node
     }
 }
 
-pub trait PackedWidget {
+pub trait PackedWidget: Clone {
     fn unpack(&self, unpacker: &mut Unpacker, gui: &mut Gui, parent: GuiNodeObj) -> GuiNodeObj;
 }
 
-impl PackedWidget for () {
-    fn unpack(&self, _unpacker: &mut Unpacker, _gui: &mut Gui, _parent: GuiNodeObj) -> GuiNodeObj {
-        panic!("unpacking nonexistent node");
-    }
-}
-
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct PackedNode<W: PackedWidget> {
     layout: GuiLayout,
     children: Vec<W>,
@@ -104,7 +81,7 @@ impl<W: PackedWidget> PackedWidget for PackedNode<W> {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct PackedPanel<W: PackedWidget> {
     name: Option<String>,
     class: Option<String>,
@@ -114,17 +91,35 @@ pub struct PackedPanel<W: PackedWidget> {
 
 impl<W: PackedWidget> PackedWidget for PackedPanel<W> {
     fn unpack(&self, unpacker: &mut Unpacker, gui: &mut Gui, parent: GuiNodeObj) -> GuiNodeObj {
-        let panel: Panel = gui.create_widget(parent);
+        let panel: Panel = gui.create_widget(parent, self.class.as_deref());
         unpacker.unpack_children(gui, panel.node(), &self.children);
         unpacker.finish_widget(panel, &self.name, &self.layout)
     }
 }
 
-pub trait WidgetCollection: Sized {
-    fn from_unpacked_widgets(root: GuiNodeObj, unpacker: Unpacker) -> Self;
-    fn unpack<W: PackedWidget>(gui: &mut Gui, parent: GuiNodeObj, packed_widget: W) -> Self {
-        let mut unpacker = Unpacker(HashMap::new());
-        let root = packed_widget.unpack(&mut unpacker, gui, parent);
-        Self::from_unpacked_widgets(root, unpacker)
+#[derive(Clone, Serialize, Deserialize)]
+pub enum StandardPackedWidget {
+    Node(PackedNode<StandardPackedWidget>),
+    Panel(PackedPanel<StandardPackedWidget>),
+    Image(PackedImage<StandardPackedWidget>),
+    Text(PackedText),
+    Button(PackedButton),
+}
+
+impl PackedWidget for StandardPackedWidget {
+    fn unpack(&self, unpacker: &mut Unpacker, gui: &mut Gui, parent: GuiNodeObj) -> GuiNodeObj {
+        match self {
+            StandardPackedWidget::Node(inner) => inner.unpack(unpacker, gui, parent),
+            StandardPackedWidget::Panel(inner) => inner.unpack(unpacker, gui, parent),
+            StandardPackedWidget::Image(inner) => inner.unpack(unpacker, gui, parent),
+            StandardPackedWidget::Text(inner) => inner.unpack(unpacker, gui, parent),
+            StandardPackedWidget::Button(inner) => inner.unpack(unpacker, gui, parent),
+        }
+    }
+}
+
+impl Asset for StandardPackedWidget {
+    fn read_from(reader: BufReader) -> AssetResult<Self> {
+        gristmill::asset::util::read_yaml(reader)
     }
 }

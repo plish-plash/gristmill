@@ -1,11 +1,11 @@
 use crate::{
-    widget::{StyleQuery, StyleValues, Widget},
+    widget::{StyleQuery, StyleValue, StyleValues, Widget},
     Gui, GuiDraw, GuiLayout, GuiNode, GuiNodeExt, GuiNodeObj,
 };
 use glyph_brush::*;
 use gristmill::{
     color::Pixel,
-    geom2d::{Rect, Size},
+    geom2d::{IRect, Size},
     math::IVec2,
 };
 use serde::{Deserialize, Serialize};
@@ -97,20 +97,23 @@ impl Text {
     pub(crate) fn default_style() -> StyleValues {
         let default = TextStyle::default();
         let mut style = StyleValues::new();
-        style.set("font-size", default.font_size);
-        style.set("color", default.color);
+        style.insert("font_size".to_owned(), StyleValue::from(default.font_size));
+        style.insert(
+            "color".to_owned(),
+            StyleValue::try_from(default.color.into_raw::<[f32; 4]>()).unwrap(),
+        );
         style
     }
 }
 
 impl Widget for Text {
     fn class_name() -> &'static str {
-        "Text"
+        "text"
     }
     fn new(_gui: &mut Gui, parent: GuiNodeObj) -> Self {
         let node = parent.add_child(GuiNode::with_draw_and_layout(
             GuiDraw::Text(OwnedSection::default()),
-            GuiLayout::Child(Rect::new(IVec2::ZERO, Size::new(256, 32))),
+            GuiLayout::Child(IRect::new(IVec2::ZERO, Size::new(256, 32))),
         ));
         Text {
             style: TextStyle::default(),
@@ -120,8 +123,8 @@ impl Widget for Text {
     fn apply_style(&mut self, style: StyleQuery) {
         let default = TextStyle::default();
         // TODO font
-        self.style.font_size = style.get("font-size", default.font_size);
-        self.style.color = style.get("color", default.color);
+        self.style.font_size = style.get("font_size").unwrap_or(default.font_size);
+        self.style.color = style.get("color").unwrap_or(default.color);
     }
     fn node(&self) -> &GuiNodeObj {
         &self.node

@@ -1,125 +1,99 @@
 use gristmill::{
-    asset::{Asset, AssetResult, AssetWrite, BufReader, BufWriter},
+    asset::{Asset, AssetError, AssetResult, AssetWrite, BufReader, BufWriter},
     color::Pixel,
-    geom2d::{EdgeRect, Rect, Size},
+    color::{LinSrgb, WithAlpha},
+    geom2d::Size,
+    render::{
+        texture::{Texture, TextureStorage},
+        RenderContext,
+    },
     Color,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::io::{Read, Write};
+use toml::value::{Array, Table, Value};
 
-#[derive(Clone, Copy, Serialize, Deserialize)]
-pub enum StyleValue {
-    Number(i32),
-    Color([f32; 4]),
-    Size(Size),
-    Rect(Rect),
-    EdgeRect(EdgeRect),
+pub type StyleValue = Value;
+pub type StyleValues = Table;
+
+pub trait FromStyleValue: Sized {
+    fn from_style(value: &Value) -> Option<Self>;
 }
 
-impl TryFrom<StyleValue> for i32 {
-    type Error = ();
-    fn try_from(value: StyleValue) -> Result<Self, Self::Error> {
-        match value {
-            StyleValue::Number(num) => Ok(num),
-            _ => Err(()),
-        }
+pub(crate) fn make_empty_texture() -> Value {
+    let mut table = Table::new();
+    table.insert("texture".to_owned(), Value::Boolean(false));
+    Value::Table(table)
+}
+fn convert_i64_array(array: &Array) -> Option<Vec<i64>> {
+    if array.iter().any(|x| !x.is_integer()) {
+        None
+    } else {
+        Some(array.iter().map(|x| x.as_integer().unwrap()).collect())
     }
 }
-impl TryFrom<StyleValue> for Color {
-    type Error = ();
-    fn try_from(value: StyleValue) -> Result<Self, Self::Error> {
-        match value {
-            StyleValue::Color(color) => Ok(*Color::from_raw(&color)),
-            _ => Err(()),
-        }
-    }
-}
-impl TryFrom<StyleValue> for Size {
-    type Error = ();
-    fn try_from(value: StyleValue) -> Result<Self, Self::Error> {
-        match value {
-            StyleValue::Number(num) => Ok(Size::new(num as u32, num as u32)),
-            StyleValue::Size(size) => Ok(size),
-            _ => Err(()),
-        }
-    }
-}
-impl TryFrom<StyleValue> for Rect {
-    type Error = ();
-    fn try_from(value: StyleValue) -> Result<Self, Self::Error> {
-        match value {
-            StyleValue::Rect(rect) => Ok(rect),
-            _ => Err(()),
-        }
-    }
-}
-impl TryFrom<StyleValue> for EdgeRect {
-    type Error = ();
-    fn try_from(value: StyleValue) -> Result<Self, Self::Error> {
-        match value {
-            StyleValue::Number(num) => Ok(EdgeRect::splat(num)),
-            StyleValue::EdgeRect(rect) => Ok(rect),
-            _ => Err(()),
-        }
+fn convert_f32_array(array: &Array) -> Option<Vec<f32>> {
+    if array.iter().any(|x| !x.is_float()) {
+        None
+    } else {
+        Some(array.iter().map(|x| x.as_float().unwrap() as f32).collect())
     }
 }
 
-impl From<i32> for StyleValue {
-    fn from(val: i32) -> StyleValue {
-        StyleValue::Number(val)
+impl FromStyleValue for i32 {
+    fn from_style(value: &Value) -> Option<Self> {
+        if let Value::Integer(int) = value {
+            Some(*int as i32)
+        } else {
+            None
+        }
     }
 }
-impl From<Color> for StyleValue {
-    fn from(val: Color) -> StyleValue {
-        StyleValue::Color(val.into_raw())
+impl FromStyleValue for Size {
+    fn from_style(value: &Value) -> Option<Self> {
+        if let Value::Array(array) = value {
+            if let Some(array) = convert_i64_array(array) {
+                if array.len() == 2 && array[0] >= 0 && array[1] >= 0 {
+                    return Some(Size::new(array[0] as u32, array[1] as u32));
+                }
+            }
+        }
+        None
     }
 }
-impl From<Size> for StyleValue {
-    fn from(val: Size) -> StyleValue {
-        StyleValue::Size(val)
-    }
-}
-impl From<Rect> for StyleValue {
-    fn from(val: Rect) -> StyleValue {
-        StyleValue::Rect(val)
-    }
-}
-impl From<EdgeRect> for StyleValue {
-    fn from(val: EdgeRect) -> StyleValue {
-        StyleValue::EdgeRect(val)
+impl FromStyleValue for Color {
+    fn from_style(value: &Value) -> Option<Self> {
+        if let Value::Array(array) = value {
+            if let Some(array) = convert_f32_array(array) {
+                if array.len() == 3 {
+                    return Some(LinSrgb::from_raw(&array[0..3]).with_alpha(1.0));
+                } else if array.len() == 4 {
+                    return Some(*Color::from_raw(&array[0..4]));
+                }
+            }
+        }
+        None
     }
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct StyleValues(HashMap<String, StyleValue>);
-
-impl StyleValues {
-    pub fn new() -> StyleValues {
-        Default::default()
-    }
-    pub fn get(&self, key: &str) -> Option<StyleValue> {
-        self.0.get(key).cloned()
-    }
-    pub fn set<V: Into<StyleValue>>(&mut self, key: &str, value: V) -> &mut StyleValues {
-        self.0.insert(key.to_owned(), value.into());
-        self
-    }
-}
-
-#[derive(Clone, Default, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct WidgetStyles(HashMap<String, StyleValues>);
+pub struct WidgetStyles(toml::value::Table);
 
 impl Asset for WidgetStyles {
-    fn read_from(reader: BufReader) -> AssetResult<Self> {
-        gristmill::asset::util::read_ron(reader)
+    fn read_from(mut reader: BufReader) -> AssetResult<Self> {
+        let mut string = String::new();
+        reader.read_to_string(&mut string)?;
+        toml::from_str(&string).map_err(|err| AssetError::InvalidFormat(err.to_string()))
     }
 }
 
 impl AssetWrite for WidgetStyles {
-    fn write_to(value: &Self, writer: BufWriter) -> AssetResult<()> {
-        gristmill::asset::util::write_ron(writer, value)
+    fn write_to(value: &Self, mut writer: BufWriter) -> AssetResult<()> {
+        let string =
+            toml::to_string(value).map_err(|err| AssetError::InvalidFormat(err.to_string()))?;
+        writer.write_all(string.as_bytes())?;
+        Ok(())
     }
 }
 
@@ -127,7 +101,7 @@ impl WidgetStyles {
     pub fn new() -> Self {
         Default::default()
     }
-    pub fn with_all_defaults() -> Self {
+    pub(crate) fn with_all_defaults() -> Self {
         use super::*;
         let mut styles = Self::new();
         styles.insert(Image::class_name(), Image::default_style());
@@ -137,13 +111,25 @@ impl WidgetStyles {
     }
 
     pub fn get(&self, class: &str) -> Option<&StyleValues> {
-        self.0.get(class)
+        self.0.get(class).and_then(|v| v.as_table())
     }
     pub fn insert(&mut self, class: &str, values: StyleValues) {
-        self.0.insert(class.to_owned(), values);
+        self.0.insert(class.to_owned(), Value::Table(values));
     }
 
-    pub fn query<'a, I>(&self, classes: I) -> StyleQuery
+    pub fn load_textures(&self, context: &mut RenderContext) {
+        let textures = TextureStorage::assets();
+        for values in self.0.values().filter_map(|v| v.as_table()) {
+            for value in values.values() {
+                if let Value::Table(table) = value {
+                    if let Some(Value::String(texture)) = table.get("texture") {
+                        textures.load(context, texture);
+                    }
+                }
+            }
+        }
+    }
+    pub fn query<'a, I>(&'a self, classes: I) -> StyleQuery
     where
         I: IntoIterator<Item = &'a str>,
     {
@@ -151,6 +137,7 @@ impl WidgetStyles {
             classes
                 .into_iter()
                 .filter_map(|class| self.0.get(class))
+                .filter_map(|v| v.as_table())
                 .collect(),
         )
     }
@@ -159,15 +146,25 @@ impl WidgetStyles {
 pub struct StyleQuery<'a>(Vec<&'a StyleValues>);
 
 impl<'a> StyleQuery<'a> {
-    pub fn get<T>(&self, key: &str, default: T) -> T
+    pub fn get<T>(&self, key: &str) -> Option<T>
     where
-        T: TryFrom<StyleValue>,
+        T: FromStyleValue,
     {
         for values in self.0.iter() {
-            if let Some(value) = values.get(key).and_then(|v| T::try_from(v).ok()) {
-                return value;
+            if let Some(value) = values.get(key).and_then(|v| T::from_style(v)) {
+                return Some(value);
             }
         }
-        default
+        None
+    }
+    pub fn get_texture(&self, key: &str) -> Option<Texture> {
+        for values in self.0.iter() {
+            if let Some(Value::Table(table)) = values.get(key) {
+                if let Some(Value::String(texture)) = table.get("texture") {
+                    return TextureStorage::assets().get(texture);
+                }
+            }
+        }
+        None
     }
 }

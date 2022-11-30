@@ -1,9 +1,11 @@
+use crate::widget::StyleValue;
 use crate::{
     widget::{StyleQuery, StyleValues, Widget},
     Gui, GuiDraw, GuiFlags, GuiLayout, GuiNode, GuiNodeExt, GuiNodeObj,
 };
 use gristmill::{
-    geom2d::{Rect, Size},
+    color::Pixel,
+    geom2d::{IRect, Size},
     render::texture::Texture,
     Color,
 };
@@ -25,15 +27,25 @@ impl Image {
 
     pub(crate) fn default_style() -> StyleValues {
         let mut style = StyleValues::new();
-        style.set("color", crate::color::WHITE);
-        style.set("size", Image::DEFAULT_SIZE);
+        style.insert(
+            "texture".to_owned(),
+            crate::widget::style::make_empty_texture(),
+        );
+        style.insert(
+            "color".to_owned(),
+            StyleValue::try_from(crate::color::WHITE.into_raw::<[f32; 4]>()).unwrap(),
+        );
+        style.insert(
+            "size".to_owned(),
+            StyleValue::try_from(Image::DEFAULT_SIZE).unwrap(),
+        );
         style
     }
 }
 
 impl Widget for Image {
     fn class_name() -> &'static str {
-        "Image"
+        "image"
     }
     fn new(_gui: &mut Gui, parent: GuiNodeObj) -> Self {
         let flags = GuiFlags {
@@ -44,15 +56,18 @@ impl Widget for Image {
         let node = parent.add_child(GuiNode::new(
             flags,
             draw,
-            Rect::from_size(Image::DEFAULT_SIZE),
+            IRect::from_size(Image::DEFAULT_SIZE),
         ));
         Image(node)
     }
     fn apply_style(&mut self, style: StyleQuery) {
         let mut write_guard = self.0.write();
-        write_guard.draw = GuiDraw::Rect(None, style.get("color", crate::color::WHITE));
-        write_guard.layout =
-            GuiLayout::Child(Rect::from_size(style.get("size", Image::DEFAULT_SIZE)));
+        let texture = style.get_texture("texture");
+        write_guard.draw =
+            GuiDraw::Rect(texture, style.get("color").unwrap_or(crate::color::WHITE));
+        write_guard.layout = GuiLayout::Child(IRect::from_size(
+            style.get("size").unwrap_or(Image::DEFAULT_SIZE),
+        ));
     }
     fn node(&self) -> &GuiNodeObj {
         &self.0

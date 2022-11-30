@@ -19,8 +19,8 @@ pub struct WidgetInput<'a> {
     pub pointer_over: Option<GuiNodeKey>,
 }
 
-pub trait WidgetBehavior {
-    fn update(&self, input: WidgetInput);
+pub trait WidgetState: 'static {
+    fn update(&mut self, input: WidgetInput);
 }
 
 pub trait Widget: Sized {

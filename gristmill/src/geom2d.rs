@@ -6,6 +6,7 @@ use std::{
 };
 
 #[derive(Copy, Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
+#[serde(from = "IVec2", into = "IVec2")]
 pub struct Size {
     pub width: u32,
     pub height: u32,
@@ -24,10 +25,10 @@ impl Size {
         self.width as f32 / self.height as f32
     }
 
-    pub fn as_vec2(self) -> Vec2 {
+    pub fn as_vec2(&self) -> Vec2 {
         Vec2::new(self.width as f32, self.height as f32)
     }
-    pub fn as_ivec2(self) -> IVec2 {
+    pub fn as_ivec2(&self) -> IVec2 {
         IVec2::new(self.width as i32, self.height as i32)
     }
 }
@@ -58,7 +59,6 @@ impl From<[u32; 2]> for Size {
         }
     }
 }
-
 impl From<(u32, u32)> for Size {
     fn from(size: (u32, u32)) -> Size {
         Size {
@@ -67,7 +67,6 @@ impl From<(u32, u32)> for Size {
         }
     }
 }
-
 impl From<IVec2> for Size {
     fn from(size: IVec2) -> Size {
         Size {
@@ -77,6 +76,14 @@ impl From<IVec2> for Size {
     }
 }
 
+impl From<Size> for IVec2 {
+    fn from(size: Size) -> IVec2 {
+        IVec2 {
+            x: size.width as i32,
+            y: size.height as i32,
+        }
+    }
+}
 impl From<Size> for vulkano::image::ImageDimensions {
     fn from(size: Size) -> Self {
         vulkano::image::ImageDimensions::Dim2d {
@@ -87,24 +94,80 @@ impl From<Size> for vulkano::image::ImageDimensions {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialEq, Default, Debug, Serialize, Deserialize)]
 pub struct Rect {
-    pub position: IVec2,
-    pub size: Size,
+    pub position: Vec2,
+    pub size: Vec2,
 }
 
 impl Rect {
     pub const ZERO: Rect = Rect {
+        position: Vec2::ZERO,
+        size: Vec2::ZERO,
+    };
+    pub const ONE: Rect = Rect {
+        position: Vec2::ZERO,
+        size: Vec2::ONE,
+    };
+
+    pub fn new(position: Vec2, size: Vec2) -> Rect {
+        Rect { position, size }
+    }
+    pub fn from_size(size: Vec2) -> Rect {
+        Rect {
+            position: Vec2::ZERO,
+            size,
+        }
+    }
+
+    pub fn as_irect(&self) -> IRect {
+        IRect {
+            position: self.position.as_ivec2(),
+            size: self.size.as_ivec2().into(),
+        }
+    }
+}
+
+impl From<[f32; 4]> for Rect {
+    fn from(rect: [f32; 4]) -> Rect {
+        Rect {
+            position: Vec2::new(rect[0], rect[1]),
+            size: Vec2::new(rect[2], rect[3]),
+        }
+    }
+}
+impl From<Rect> for [f32; 4] {
+    fn from(rect: Rect) -> [f32; 4] {
+        [rect.position.x, rect.position.y, rect.size.x, rect.size.y]
+    }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
+pub struct IRect {
+    pub position: IVec2,
+    pub size: Size,
+}
+
+impl IRect {
+    pub const ZERO: IRect = IRect {
         position: IVec2::ZERO,
         size: Size::ZERO,
     };
-    pub fn new(position: IVec2, size: Size) -> Rect {
-        Rect { position, size }
+
+    pub fn new(position: IVec2, size: Size) -> IRect {
+        IRect { position, size }
     }
-    pub fn from_size(size: Size) -> Rect {
-        Rect {
+    pub fn from_size(size: Size) -> IRect {
+        IRect {
             position: IVec2::ZERO,
             size,
+        }
+    }
+
+    pub fn as_rect(&self) -> Rect {
+        Rect {
+            position: self.position.as_vec2(),
+            size: self.size.as_vec2(),
         }
     }
 
@@ -143,12 +206,12 @@ impl Rect {
             && self.position.y + self.size.height as i32 > point.y
     }
 
-    pub fn inset(&self, insets: EdgeRect) -> Rect {
+    pub fn inset(&self, insets: EdgeRect) -> IRect {
         let width = self.size.width as i32;
         let height = self.size.height as i32;
         let inset_width = insets.left + insets.right;
         let inset_height = insets.top + insets.bottom;
-        Rect {
+        IRect {
             position: IVec2 {
                 x: self.position.x + insets.left,
                 y: self.position.y + insets.right,
@@ -169,13 +232,13 @@ impl Rect {
     }
 }
 
-impl Add<IVec2> for Rect {
-    type Output = Rect;
+impl Add<IVec2> for IRect {
+    type Output = IRect;
     fn add(self, rhs: IVec2) -> Self::Output {
-        Rect::new(self.position + rhs, self.size)
+        IRect::new(self.position + rhs, self.size)
     }
 }
-impl AddAssign<IVec2> for Rect {
+impl AddAssign<IVec2> for IRect {
     fn add_assign(&mut self, other: IVec2) {
         *self = *self + other;
     }

@@ -5,7 +5,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct PackedImage<W: PackedWidget> {
     name: Option<String>,
     class: Option<String>,
@@ -16,7 +16,7 @@ pub struct PackedImage<W: PackedWidget> {
 
 impl<W: PackedWidget> PackedWidget for PackedImage<W> {
     fn unpack(&self, unpacker: &mut Unpacker, gui: &mut Gui, parent: GuiNodeObj) -> GuiNodeObj {
-        let image: Image = gui.create_widget(parent);
+        let image: Image = gui.create_widget(parent, self.class.as_deref());
         unpacker.unpack_children(gui, image.node(), &self.children);
         unpacker.finish_widget(image, &self.name, &self.layout)
     }

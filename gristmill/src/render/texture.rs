@@ -1,6 +1,11 @@
 use crate::{asset::Asset, geom2d::Size, render::RenderContext};
 use image::DynamicImage;
-use std::{collections::HashMap, hash::Hash, sync::Arc};
+use once_cell::sync::Lazy;
+use std::{
+    collections::HashMap,
+    hash::Hash,
+    sync::{Arc, RwLock},
+};
 use vulkano::{
     format::Format,
     image::view::{ImageView, ImageViewCreateInfo},
@@ -113,36 +118,44 @@ impl PartialEq for Texture {
 }
 impl Eq for Texture {}
 
+static TEXTURE_STORAGE_ASSETS: Lazy<TextureStorage> = Lazy::new(|| TextureStorage::new("assets"));
+
+#[derive(Clone)]
 pub struct TextureStorage {
     prefix: &'static str,
-    textures: HashMap<String, Texture>,
+    textures: Arc<RwLock<HashMap<String, Texture>>>,
 }
 
 impl TextureStorage {
     pub fn new(prefix: &'static str) -> Self {
         TextureStorage {
             prefix,
-            textures: HashMap::new(),
+            textures: Arc::default(),
         }
     }
-    pub fn assets() -> Self {
-        Self::new("assets")
+    pub fn assets() -> &'static Self {
+        &TEXTURE_STORAGE_ASSETS
     }
-    pub fn get(&mut self, context: &mut RenderContext, asset_path: &str) -> Option<&Texture> {
-        if !self.textures.contains_key(asset_path) {
-            if let Some(image) = DynamicImage::load(self.prefix, asset_path) {
-                let texture = Texture::load(context, &image);
-                self.textures.insert(asset_path.to_owned(), texture);
-            }
+
+    pub fn load(&self, context: &mut RenderContext, asset_path: &str) -> Option<Texture> {
+        let mut write_guard = self.textures.write().unwrap();
+        if let Some(texture) = write_guard.get(asset_path) {
+            Some(texture.clone())
+        } else if let Some(image) = DynamicImage::load(self.prefix, asset_path) {
+            let texture = Texture::load(context, &image);
+            write_guard.insert(asset_path.to_owned(), texture.clone());
+            Some(texture)
+        } else {
+            log::error!("Failed to load texture \"{}\".", asset_path);
+            None
         }
-        self.textures.get(asset_path)
     }
-    pub fn preload<'a, I>(&mut self, context: &mut RenderContext, asset_paths: I)
-    where
-        I: IntoIterator<Item = &'a str>,
-    {
-        for asset_path in asset_paths {
-            self.get(context, asset_path);
+    pub fn get(&self, asset_path: &str) -> Option<Texture> {
+        if let Some(texture) = self.textures.read().unwrap().get(asset_path) {
+            Some(texture.clone())
+        } else {
+            log::error!("Texture \"{}\" hasn't been loaded.", asset_path);
+            None
         }
     }
 }

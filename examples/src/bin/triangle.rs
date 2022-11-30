@@ -1,7 +1,6 @@
 use bytemuck::{Pod, Zeroable};
 use gristmill::{
-    asset::AssetStorage, input::InputActions, render::RenderContext, run_game, Color, Game,
-    GameWindow,
+    input::InputActions, render::RenderContext, run_game, Color, Game, GameRenderer, GameWindow,
 };
 use std::sync::Arc;
 use vulkano::{
@@ -77,8 +76,8 @@ pub struct ExampleRenderer {
     vertex_buffer: Arc<CpuAccessibleBuffer<[Vertex]>>,
 }
 
-impl ExampleRenderer {
-    pub fn new(context: &mut RenderContext) -> Self {
+impl GameRenderer for ExampleRenderer {
+    fn new(context: &mut RenderContext) -> Self {
         let pipeline = ExamplePipeline::new(context);
 
         let vertices = [
@@ -108,6 +107,9 @@ impl ExampleRenderer {
             vertex_buffer,
         }
     }
+}
+
+impl ExampleRenderer {
     pub fn render(&self, context: &mut RenderContext) {
         self.pipeline.bind(context);
         context
@@ -118,30 +120,25 @@ impl ExampleRenderer {
     }
 }
 
-struct TriangleGame {
-    renderer: ExampleRenderer,
-}
+struct TriangleGame;
 
 impl Game for TriangleGame {
-    fn load(_config: AssetStorage, context: &mut RenderContext) -> Self {
-        TriangleGame {
-            renderer: ExampleRenderer::new(context),
-        }
-    }
+    type Renderer = ExampleRenderer;
 
-    fn update(&mut self, window: &mut GameWindow, input: &InputActions, _delta: f64) {
-        if input.get("exit").pressed() {
+    fn update(&mut self, window: &mut GameWindow, input: &InputActions, _delta: f64) -> Option<()> {
+        if input.get("exit")?.pressed() {
             window.close();
         }
+        Some(())
     }
 
-    fn render(&mut self, context: &mut RenderContext) {
+    fn render(&mut self, context: &mut RenderContext, renderer: &mut ExampleRenderer) {
         context.begin_render_pass(Color::new(0.0, 0.0, 1.0, 1.0));
-        self.renderer.render(context);
+        renderer.render(context);
         context.end_render_pass();
     }
 }
 
 fn main() {
-    run_game::<TriangleGame>();
+    run_game(|| TriangleGame);
 }

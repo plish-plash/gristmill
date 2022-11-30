@@ -1,18 +1,25 @@
+mod console;
 mod render;
 pub mod unpack;
 pub mod widget;
 
-use crate::widget::{Widget, WidgetBehavior, WidgetInput, WidgetStyles};
+pub use console::run_game_with_console;
+pub use render::GuiRenderer;
+
+use crate::widget::{Widget, WidgetInput, WidgetState, WidgetStyles};
 use glyph_brush::OwnedSection;
-use gristmill::object::DenseSlotMap;
 use gristmill::{
-    geom2d::*, input::InputActions, math::IVec2, new_object_type, object::ObjectCollection,
-    render::texture::Texture, Color,
+    asset::AssetStorage,
+    geom2d::*,
+    input::InputActions,
+    math::IVec2,
+    new_object_type,
+    object::{DenseSlotMap, ObjectCollection},
+    render::{texture::Texture, RenderContext},
+    Color,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-
-pub use render::GuiRenderer;
+use std::sync::{Arc, RwLock};
 
 mod color {
     use gristmill::color::{rgb::Rgb, Alpha};
@@ -54,7 +61,7 @@ impl Default for GuiFlags {
 
 #[derive(Eq, PartialEq, Copy, Clone, Debug, Serialize, Deserialize)]
 pub enum GuiLayout {
-    Child(Rect),
+    Child(IRect),
     Fill(EdgeRect),
     Center(Size),
     Row { spacing: i32, x_size: u32 },
@@ -63,7 +70,7 @@ pub enum GuiLayout {
 
 impl Default for GuiLayout {
     fn default() -> Self {
-        GuiLayout::Child(Rect::ZERO)
+        GuiLayout::Child(IRect::ZERO)
     }
 }
 
@@ -71,19 +78,19 @@ impl GuiLayout {
     pub fn fill() -> GuiLayout {
         GuiLayout::Fill(EdgeRect::ZERO)
     }
-    fn layout(&self, parent_rect: Rect, previous_sibling: Option<Rect>) -> Rect {
+    fn layout(&self, parent_rect: IRect, previous_sibling: Option<IRect>) -> IRect {
         match self {
             GuiLayout::Child(rect) => *rect + parent_rect.position,
             GuiLayout::Fill(insets) => parent_rect.inset(*insets),
             GuiLayout::Center(size) => {
                 let off = IVec2::new((size.width / 2) as i32, (size.height / 2) as i32);
-                Rect::new(parent_rect.center() - off, *size)
+                IRect::new(parent_rect.center() - off, *size)
             }
             GuiLayout::Row { spacing, x_size } => {
                 let x = previous_sibling
                     .map(|r| r.top_right().x + *spacing)
                     .unwrap_or(parent_rect.position.x);
-                Rect::new(
+                IRect::new(
                     IVec2::new(x, parent_rect.position.y),
                     Size::new(*x_size, parent_rect.size.height),
                 )
@@ -92,7 +99,7 @@ impl GuiLayout {
                 let y = previous_sibling
                     .map(|r| r.bottom_left().y + *spacing)
                     .unwrap_or(parent_rect.position.y);
-                Rect::new(
+                IRect::new(
                     IVec2::new(parent_rect.position.x, y),
                     Size::new(parent_rect.size.width, *y_size),
                 )
@@ -119,21 +126,21 @@ pub struct GuiNode {
     pub flags: GuiFlags,
     pub layout: GuiLayout,
     pub draw: GuiDraw,
-    pub offset: Rect,
-    rect: Rect,
+    pub offset: IRect,
+    rect: IRect,
     z: u16,
     visible: bool,
     children: Vec<GuiNodeKey>,
 }
 
 impl GuiNode {
-    pub fn new(flags: GuiFlags, draw: GuiDraw, rect: Rect) -> GuiNode {
+    pub fn new(flags: GuiFlags, draw: GuiDraw, rect: IRect) -> GuiNode {
         GuiNode {
             flags,
             layout: GuiLayout::Child(rect),
             draw,
-            offset: Rect::ZERO,
-            rect: Rect::ZERO,
+            offset: IRect::ZERO,
+            rect: IRect::ZERO,
             z: 0,
             visible: false,
             children: Vec::new(),
@@ -153,7 +160,7 @@ impl GuiNode {
         }
     }
 
-    fn draw_rect(&self) -> (Rect, u16) {
+    fn draw_rect(&self) -> (IRect, u16) {
         let mut rect = self.rect;
         rect.position += self.offset.position;
         rect.size += self.offset.size;
@@ -192,34 +199,42 @@ impl GuiNodeExt for GuiNodeObj {
 new_object_type!(GuiNode, GuiNodeKey, GuiNodeObj, GuiNodeObjects);
 
 pub struct Gui {
-    styles: Arc<WidgetStyles>,
-    viewport: Rect,
+    styles: WidgetStyles,
+    viewport: IRect,
     nodes: GuiNodeObjects,
-    behaviors: Vec<Arc<dyn WidgetBehavior>>,
+    widget_states: Vec<Arc<RwLock<dyn WidgetState>>>,
     root: GuiNodeKey,
 }
 
 impl Default for Gui {
     fn default() -> Self {
-        Gui::new()
+        let styles = AssetStorage::config()
+            .load_or_save_default("gui_styles.toml", WidgetStyles::with_all_defaults)
+            .unwrap_or_default();
+        Self::with_styles(styles)
     }
 }
 
 impl Gui {
-    pub fn new() -> Gui {
-        Gui::with_styles(WidgetStyles::new())
+    pub fn new() -> Self {
+        Default::default()
     }
     pub fn with_styles(styles: WidgetStyles) -> Gui {
         let nodes = GuiNodeObjects::default();
         let root = nodes.insert(GuiNode::default()).key();
         Gui {
-            styles: Arc::new(styles),
-            viewport: Rect::ZERO,
+            styles,
+            viewport: IRect::ZERO,
             nodes,
-            behaviors: Vec::new(),
+            widget_states: Vec::new(),
             root,
         }
     }
+
+    pub fn load_textures(&self, context: &mut RenderContext) {
+        self.styles.load_textures(context);
+    }
+
     pub fn update(&mut self, input: &InputActions) {
         // Layout all nodes.
         let mut write_guard = self.nodes.write().unwrap();
@@ -252,23 +267,25 @@ impl Gui {
         }
         let pointer_state = input.get("primary");
         let pointer_over = pointer_state
-            .pointer()
+            .and_then(|a| a.pointer())
             .and_then(|p| check_pointer_over(&write_guard, self.root, p.as_ivec2()));
         drop(write_guard);
 
-        // Update widget behaviors.
-        let input = WidgetInput {
-            state: pointer_state,
-            pointer_over,
-        };
-        for behavior in self.behaviors.iter() {
-            behavior.update(input);
+        // Update widget states.
+        if let Some(input_state) = pointer_state {
+            let input = WidgetInput {
+                state: input_state,
+                pointer_over,
+            };
+            for state in self.widget_states.iter() {
+                state.write().unwrap().update(input);
+            }
         }
     }
     fn layout_children(
         nodes: &mut DenseSlotMap<GuiNodeKey, GuiNode>,
         node: GuiNodeKey,
-        parent_rect: Rect,
+        parent_rect: IRect,
         parent_visible: bool,
         z: u16,
     ) {
@@ -286,10 +303,6 @@ impl Gui {
         }
     }
 
-    pub fn styles(&mut self) -> Arc<WidgetStyles> {
-        self.styles.clone()
-    }
-
     pub fn root(&self) -> GuiNodeObj {
         GuiNodeObj::from_key(self.nodes.clone(), self.root)
     }
@@ -297,13 +310,18 @@ impl Gui {
         self.root().write().z = z;
     }
 
-    pub fn register_behavior<B: WidgetBehavior + 'static>(&mut self, behavior: Arc<B>) {
-        self.behaviors.push(behavior);
+    pub fn register_widget_state<S: WidgetState>(&mut self, state: S) -> Arc<RwLock<S>> {
+        let arc = Arc::new(RwLock::new(state));
+        self.widget_states.push(arc.clone());
+        arc
     }
-
-    pub fn create_widget<W: Widget>(&mut self, parent: GuiNodeObj) -> W {
+    pub fn create_widget<W: Widget>(&mut self, parent: GuiNodeObj, class: Option<&str>) -> W {
         let mut widget = W::new(self, parent);
-        widget.apply_style(self.styles.query([W::class_name()]));
+        let mut classes = vec![W::class_name()];
+        if let Some(class) = class {
+            classes.insert(0, class);
+        }
+        widget.apply_style(self.styles.query(classes));
         widget
     }
 }

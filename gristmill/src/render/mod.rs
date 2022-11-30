@@ -295,7 +295,7 @@ impl RenderContext {
     pub fn end_render_pass(&mut self) {
         self.builder().end_render_pass().unwrap();
     }
-    pub(crate) fn render<G: Game>(&mut self, game: &mut G) {
+    pub(crate) fn render<G: Game>(&mut self, game: &mut G, renderer: &mut G::Renderer) {
         // Do not draw frame when screen dimensions are zero.
         let dimensions = self.window().inner_size();
         if dimensions.width == 0 || dimensions.height == 0 {
@@ -349,7 +349,7 @@ impl RenderContext {
             .unwrap(),
         );
         self.current_framebuffer_index = image_index as usize;
-        game.render(self);
+        game.render(self, renderer);
 
         let command_buffer = self.current_builder.take().unwrap().build().unwrap();
         let future = self
@@ -396,8 +396,8 @@ impl RenderContext {
     }
     pub fn viewport(&self) -> Rect {
         Rect::new(
-            Vec2::from(self.viewport.origin).as_ivec2(),
-            Vec2::from(self.viewport.dimensions).as_ivec2().into(),
+            Vec2::from(self.viewport.origin),
+            Vec2::from(self.viewport.dimensions),
         )
     }
     pub fn builder(&mut self) -> &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer> {
