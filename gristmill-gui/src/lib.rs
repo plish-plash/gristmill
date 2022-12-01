@@ -278,7 +278,7 @@ impl Gui {
                 pointer_over,
             };
             for state in self.widget_states.iter() {
-                state.write().unwrap().update(input);
+                state.try_write().unwrap().update(input);
             }
         }
     }

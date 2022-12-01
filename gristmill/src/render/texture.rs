@@ -138,7 +138,7 @@ impl TextureStorage {
     }
 
     pub fn load(&self, context: &mut RenderContext, asset_path: &str) -> Option<Texture> {
-        let mut write_guard = self.textures.write().unwrap();
+        let mut write_guard = self.textures.try_write().unwrap();
         if let Some(texture) = write_guard.get(asset_path) {
             Some(texture.clone())
         } else if let Some(image) = DynamicImage::load(self.prefix, asset_path) {
@@ -151,7 +151,7 @@ impl TextureStorage {
         }
     }
     pub fn get(&self, asset_path: &str) -> Option<Texture> {
-        if let Some(texture) = self.textures.read().unwrap().get(asset_path) {
+        if let Some(texture) = self.textures.try_read().unwrap().get(asset_path) {
             Some(texture.clone())
         } else {
             log::error!("Texture \"{}\" hasn't been loaded.", asset_path);

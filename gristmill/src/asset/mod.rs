@@ -1,7 +1,7 @@
 pub mod image;
 
 use once_cell::sync::Lazy;
-use std::sync::{Arc, RwLock};
+use serde::{Deserialize, Serialize};
 use std::{
     any::Any,
     collections::HashMap,
@@ -9,6 +9,7 @@ use std::{
     fs::File,
     io::Error as IoError,
     path::{Path, PathBuf},
+    sync::{Arc, RwLock},
 };
 
 pub type BufReader = std::io::BufReader<File>;
@@ -54,7 +55,7 @@ impl fmt::Display for AssetError {
 
 pub type AssetResult<T> = Result<T, AssetError>;
 
-pub trait Asset: Send + Sync + Sized + 'static {
+pub trait Asset: Clone + Send + Sync + Sized + 'static {
     fn read_from(reader: BufReader) -> AssetResult<Self>;
     fn load(prefix: &str, asset_path: &str) -> Option<Self> {
         let file_path = util::get_path(prefix, asset_path);
@@ -142,10 +143,12 @@ impl AssetStorage {
     }
 
     fn try_load_asset<T: Asset>(&self, asset_path: &str, log_error: bool) {
-        let mut write_guard = self.assets.write().unwrap();
-        if !write_guard.contains_key(asset_path) {
+        if !self.assets.try_read().unwrap().contains_key(asset_path) {
             if let Some(asset) = T::load(self.prefix, asset_path) {
-                write_guard.insert(asset_path.to_owned(), Box::new(asset));
+                self.assets
+                    .try_write()
+                    .unwrap()
+                    .insert(asset_path.to_owned(), Box::new(asset));
             } else if log_error {
                 log::error!("Failed to load asset \"{}\".", asset_path);
             }
@@ -153,7 +156,7 @@ impl AssetStorage {
     }
     pub fn load<T>(&self, asset_path: &str) -> Option<T>
     where
-        T: Asset + Clone,
+        T: Asset,
     {
         self.try_load_asset::<T>(asset_path, true);
         self.assets
@@ -171,12 +174,11 @@ impl AssetStorage {
     }
     pub fn load_or_save_default<T, F>(&self, asset_path: &str, default: F) -> Option<T>
     where
-        T: AssetWrite + Clone,
+        T: AssetWrite,
         F: FnOnce() -> T,
     {
         self.try_load_asset::<T>(asset_path, false);
-        let mut write_guard = self.assets.write().unwrap();
-        if !write_guard.contains_key(asset_path) {
+        if !self.assets.try_read().unwrap().contains_key(asset_path) {
             let new_asset = default();
             if !Path::exists(&util::get_path(self.prefix, asset_path)) {
                 log::info!(
@@ -190,9 +192,43 @@ impl AssetStorage {
                     asset_path
                 );
             }
-            write_guard.insert(asset_path.to_owned(), Box::new(new_asset));
+            self.assets
+                .try_write()
+                .unwrap()
+                .insert(asset_path.to_owned(), Box::new(new_asset));
         }
-        drop(write_guard);
         self.load(asset_path)
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(into = "String", try_from = "String")]
+pub struct LoadAsset<T: Asset>(T, String);
+
+impl<T: Asset> From<LoadAsset<T>> for String {
+    fn from(value: LoadAsset<T>) -> Self {
+        value.1
+    }
+}
+impl<T: Asset> TryFrom<String> for LoadAsset<T> {
+    type Error = &'static str;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if let Some(asset) = AssetStorage::assets().load(&value) {
+            Ok(LoadAsset(asset, value))
+        } else {
+            Err("failed to load sub-asset")
+        }
+    }
+}
+
+impl<T: Asset> std::ops::Deref for LoadAsset<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.0
+    }
+}
+impl<T: Asset> std::ops::DerefMut for LoadAsset<T> {
+    fn deref_mut(&mut self) -> &mut T {
+        &mut self.0
     }
 }

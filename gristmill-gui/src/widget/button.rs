@@ -1,6 +1,5 @@
-use crate::widget::StyleValue;
 use crate::{
-    widget::{Image, StyleQuery, StyleValues, Text, TextAlign, Widget, WidgetInput},
+    widget::{Image, StyleQuery, StyleValue, StyleValues, Text, TextAlign, Widget, WidgetInput},
     Gui, GuiDraw, GuiLayout, GuiNodeObj, WidgetState,
 };
 use gristmill::{
@@ -114,12 +113,12 @@ pub struct Button {
 
 impl Button {
     pub fn interact(&self) -> bool {
-        let mut write_guard = self.state.write().unwrap();
+        let mut write_guard = self.state.try_write().unwrap();
         write_guard.interactable = true;
         write_guard.just_released
     }
     pub fn state(&self) -> ButtonState {
-        self.state.read().unwrap().state
+        self.state.try_read().unwrap().state
     }
     pub fn set_label_string<S>(&self, text: S)
     where
@@ -163,13 +162,18 @@ impl Widget for Button {
     }
     fn apply_style(&mut self, style: StyleQuery) {
         if let Some(texture) = style.get_texture("texture") {
-            self.state.write().unwrap().draw = ButtonDraw::with_texture(texture);
+            self.state.try_write().unwrap().draw = ButtonDraw::with_texture(texture);
         }
         let mut write_guard = self.node.write();
         write_guard.layout = GuiLayout::Child(IRect::from_size(
             style.get("size").unwrap_or(Size::new(128, 32)),
         ));
-        write_guard.draw = self.state.read().unwrap().draw.draw(ButtonState::Disabled);
+        write_guard.draw = self
+            .state
+            .try_read()
+            .unwrap()
+            .draw
+            .draw(ButtonState::Disabled);
     }
     fn node(&self) -> &GuiNodeObj {
         &self.node
