@@ -1,13 +1,20 @@
 use crate::{
-    widget::{Text, TextAlign},
-    Gui, GuiLayout, GuiRenderer, Widget,
-};
-use glyph_brush::OwnedText;
-use gristmill::{
-    geom2d::Size, input::InputActions, render::RenderContext, Color, Game, GameWindow, LogRecord,
+    gui::{
+        widget::{Text, TextAlign, WidgetNode, WidgetStyles},
+        Gui, GuiLayout, OwnedText,
+    },
+    input::InputSystem,
+    render::{RenderContext, Renderable},
+    Game, GameWindow,
 };
 use log::Level;
 use std::{collections::VecDeque, sync::mpsc};
+
+pub struct LogRecord {
+    pub level: Level,
+    pub target: String,
+    pub message: String,
+}
 
 fn log_level_color(level: Level) -> [f32; 4] {
     match level {
@@ -19,7 +26,7 @@ fn log_level_color(level: Level) -> [f32; 4] {
     }
 }
 
-struct ConsoleGame<G: Game> {
+pub struct ConsoleGame<G: Game> {
     log_receiver: mpsc::Receiver<LogRecord>,
     buffer: VecDeque<LogRecord>,
     gui: Gui,
@@ -48,14 +55,18 @@ impl<G: Game> ConsoleGame<G> {
         for record in self.buffer.iter() {
             Self::record_to_text(record, &mut text);
         }
-        self.text.set_text(text);
+        self.text.set_text(&mut self.gui, text);
     }
 
-    fn new(log_receiver: mpsc::Receiver<LogRecord>, game: G) -> Self {
-        let mut gui = Gui::default();
+    pub fn new(
+        context: &mut RenderContext,
+        log_receiver: mpsc::Receiver<LogRecord>,
+        game: G,
+    ) -> Self {
+        let mut gui = Gui::with_styles(context, WidgetStyles::default());
         let text: Text = gui.create_widget(gui.root(), None);
-        text.set_layout(GuiLayout::fill());
-        text.set_align(TextAlign::LeftWrap);
+        text.set_layout(&mut gui, GuiLayout::fill());
+        text.set_align(&mut gui, TextAlign::LeftWrap);
         ConsoleGame {
             log_receiver,
             buffer: VecDeque::new(),
@@ -67,17 +78,29 @@ impl<G: Game> ConsoleGame<G> {
     }
 }
 
-impl<G: Game> Game for ConsoleGame<G> {
-    type Renderer = (GuiRenderer, G::Renderer);
-    fn resize(&mut self, dimensions: Size) {
-        self.game.resize(dimensions);
+impl<G: Game> Renderable for ConsoleGame<G> {
+    fn pre_render(&mut self, context: &mut RenderContext) {
+        if self.show_console {
+            self.gui.pre_render(context);
+        } else {
+            self.game.pre_render(context);
+        }
     }
-    fn update(&mut self, window: &mut GameWindow, input: &InputActions, delta: f64) -> Option<()> {
-        if input
-            .get("console")
-            .map(|a| a.just_pressed())
-            .unwrap_or(false)
-        {
+    fn render(&mut self, context: &mut RenderContext) {
+        if self.show_console {
+            self.gui.render(context);
+        } else {
+            self.game.render(context);
+        }
+    }
+}
+
+impl<G: Game> Game for ConsoleGame<G> {
+    fn input_system(&mut self) -> &mut InputSystem {
+        self.game.input_system()
+    }
+    fn update(&mut self, window: &mut GameWindow, delta: f64) {
+        if self.input_system().actions().get("console").just_pressed() {
             self.show_console = !self.show_console;
         }
         while let Ok(record) = self.log_receiver.try_recv() {
@@ -88,6 +111,7 @@ impl<G: Game> Game for ConsoleGame<G> {
         }
 
         if self.show_console {
+            let input = self.game.input_system().actions();
             self.gui.update(input);
             if input
                 .try_get("exit")
@@ -97,31 +121,7 @@ impl<G: Game> Game for ConsoleGame<G> {
                 window.close();
             }
         } else {
-            self.game.update(window, input, delta);
-        }
-        Some(())
-    }
-    fn render(
-        &mut self,
-        context: &mut RenderContext,
-        (gui_renderer, game_renderer): &mut Self::Renderer,
-    ) {
-        if self.show_console {
-            gui_renderer.process(context, &mut self.gui);
-            context.begin_render_pass(Color::new(0.9, 0.9, 0.9, 1.0));
-            gui_renderer.draw_all(context);
-            context.end_render_pass();
-        } else {
-            self.game.render(context, game_renderer);
+            self.game.update(window, delta);
         }
     }
-}
-
-pub fn run_game_with_console<G, F>(func: F) -> !
-where
-    G: Game,
-    F: FnOnce() -> G,
-{
-    let log_receiver = gristmill::init_custom_logging();
-    gristmill::run_game(|| ConsoleGame::new(log_receiver, func()))
 }

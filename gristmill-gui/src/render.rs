@@ -1,15 +1,12 @@
-use crate::{Gui, GuiDraw};
+use crate::{GuiDraw, GuiNodeStorage};
 use glyph_brush::*;
-use gristmill::{
-    color::Pixel,
+use gristmill_core::{
     geom2d::{IRect, Rect, Size},
     math::IVec2,
-    render::{
-        texture::Texture,
-        texture_rect::{TextureRect, TextureRectRenderer},
-        RenderContext,
-    },
-    GameRenderer,
+};
+use gristmill_render::{
+    texture_rect::{TextureRect, TextureRectRenderer},
+    ImageDimensionsExt, RenderContext, Texture,
 };
 use std::sync::Arc;
 use vulkano::{
@@ -18,7 +15,7 @@ use vulkano::{
     format::Format,
     image::{
         view::{ImageView, ImageViewCreateInfo},
-        ImageCreateFlags, ImageUsage, ImageViewAbstract, StorageImage,
+        ImageCreateFlags, ImageDimensions, ImageUsage, ImageViewAbstract, StorageImage,
     },
     sampler::{ComponentMapping, ComponentSwizzle},
 };
@@ -52,8 +49,8 @@ pub struct GuiRenderer {
     glyph_draw: Vec<TextureRect>,
 }
 
-impl GameRenderer for GuiRenderer {
-    fn new(context: &mut RenderContext) -> Self {
+impl GuiRenderer {
+    pub fn new(context: &mut RenderContext) -> Self {
         let font =
             ab_glyph::FontArc::try_from_slice(include_bytes!("./OpenSans-Regular.ttf")).unwrap();
         let glyph_brush = GlyphBrushBuilder::using_font(font)
@@ -69,9 +66,7 @@ impl GameRenderer for GuiRenderer {
             glyph_draw: Vec::new(),
         }
     }
-}
 
-impl GuiRenderer {
     pub fn rect_renderer(&mut self) -> &mut TextureRectRenderer {
         &mut self.rect_renderer
     }
@@ -84,14 +79,14 @@ impl GuiRenderer {
             texture: Some(glyph_texture.clone()),
             rect: convert_rect(glyph.pixel_coords),
             uv_rect: convert_rect(glyph.tex_coords),
-            color: *gristmill::Color::from_raw(&glyph.extra.color),
+            color: gristmill_core::Color::from(glyph.extra.color),
             z: glyph.extra.z as u16,
         }
     }
     fn create_glyph_texture(context: &mut RenderContext, dimensions: Size) -> Texture {
         let image = StorageImage::with_usage(
             context.allocator(),
-            dimensions.into(),
+            ImageDimensions::from_size(dimensions),
             Format::R8_SRGB,
             ImageUsage {
                 transfer_dst: true,
@@ -136,10 +131,8 @@ impl GuiRenderer {
         context.builder().copy_buffer_to_image(copy_info).unwrap();
     }
 
-    pub fn process(&mut self, context: &mut RenderContext, gui: &mut Gui) {
-        gui.viewport = context.viewport().as_irect();
-
-        for (_, node) in gui.nodes.read().unwrap().iter() {
+    pub fn process(&mut self, context: &mut RenderContext, nodes: &GuiNodeStorage) {
+        for (_, node) in nodes.iter() {
             if !node.visible {
                 continue;
             }

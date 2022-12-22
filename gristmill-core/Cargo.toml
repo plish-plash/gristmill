@@ -1,0 +1,14 @@
+[package]
+name = "gristmill-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+log = "0.4"
+slotmap = "1.0"
+glam = { version = "0.22", features = ["serde"] }
+
+serde = "1.0"
+serde_yaml = "0.9"
+image = { version = "0.24", default-features = false, features = ["png", "bmp"] }
+winit = { version = "0.27", features = ["serde"] }

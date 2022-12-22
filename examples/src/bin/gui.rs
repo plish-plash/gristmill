@@ -1,10 +1,13 @@
 use gristmill::{
-    geom2d::IRect, geom2d::Size, input::InputActions, math::IVec2, render::RenderContext, run_game,
-    Color, Game, GameWindow,
-};
-use gristmill_gui::{
-    widget::{Button, Text, TextAlign, Widget},
-    Gui, GuiLayout, GuiRenderer,
+    geom2d::{IRect, Size},
+    gui::{
+        widget::{Button, Text, TextAlign, WidgetNode},
+        Gui, GuiLayout,
+    },
+    input::InputSystem,
+    math::IVec2,
+    render::{RenderContext, Renderable},
+    run_game, Game, GameWindow,
 };
 
 struct ButtonExample {
@@ -17,19 +20,19 @@ impl ButtonExample {
     fn new(gui: &mut Gui) -> Self {
         let root = gui.root();
 
-        let button: Button = gui.create_widget(root.clone(), None);
-        button.set_layout(GuiLayout::Child(IRect::new(
-            IVec2::new(32, 32),
-            Size::new(128, 32),
-        )));
-        button.set_label_string("Click Me!");
+        let button: Button = gui.create_widget(root, None);
+        button.set_layout(
+            gui,
+            GuiLayout::Child(IRect::new(IVec2::new(32, 32), Size::new(128, 32))),
+        );
+        button.set_label_string(gui, "Click Me!");
 
         let text: Text = gui.create_widget(root, None);
-        text.set_layout(GuiLayout::Child(IRect::new(
-            IVec2::new(32 + 128 + 8, 32),
-            Size::new(128, 32),
-        )));
-        text.set_align(TextAlign::MiddleLeft);
+        text.set_layout(
+            gui,
+            GuiLayout::Child(IRect::new(IVec2::new(32 + 128 + 8, 32), Size::new(128, 32))),
+        );
+        text.set_align(gui, TextAlign::MiddleLeft);
 
         ButtonExample {
             button,
@@ -37,47 +40,53 @@ impl ButtonExample {
             times_clicked: 0,
         }
     }
-    fn update(&mut self) {
+    fn update(&mut self, gui: &mut Gui) {
         if self.button.interact() {
             self.times_clicked += 1;
             self.text
-                .set_text_string(format!("Times clicked: {}", self.times_clicked));
+                .set_text_string(gui, format!("Times clicked: {}", self.times_clicked));
         }
     }
 }
 
 struct GuiGame {
+    input_system: InputSystem,
     gui: Gui,
     example: ButtonExample,
 }
 
 impl GuiGame {
-    fn new() -> Self {
-        let mut gui = Gui::new();
+    fn new(context: &mut RenderContext) -> Self {
+        let mut gui = Gui::new(context);
         let example = ButtonExample::new(&mut gui);
-        GuiGame { gui, example }
+        GuiGame {
+            input_system: InputSystem::load_bindings(),
+            gui,
+            example,
+        }
+    }
+}
+
+impl Renderable for GuiGame {
+    fn pre_render(&mut self, context: &mut RenderContext) {
+        self.gui.pre_render(context);
+    }
+    fn render(&mut self, context: &mut RenderContext) {
+        self.gui.render(context);
     }
 }
 
 impl Game for GuiGame {
-    type Renderer = GuiRenderer;
-
-    fn update(
-        &mut self,
-        _window: &mut GameWindow,
-        input: &InputActions,
-        _delta: f64,
-    ) -> Option<()> {
-        self.gui.update(input);
-        self.example.update();
-        Some(())
+    fn input_system(&mut self) -> &mut InputSystem {
+        &mut self.input_system
     }
-
-    fn render(&mut self, context: &mut RenderContext, renderer: &mut GuiRenderer) {
-        renderer.process(context, &mut self.gui);
-        context.begin_render_pass(Color::new(0.0, 0.5, 0.5, 1.0));
-        renderer.draw_all(context);
-        context.end_render_pass();
+    fn update(&mut self, window: &mut GameWindow, _delta: f64) {
+        let input_actions = self.input_system.actions();
+        if input_actions.get("exit").just_pressed() {
+            window.close();
+        }
+        self.example.update(&mut self.gui);
+        self.gui.update(input_actions);
     }
 }
 

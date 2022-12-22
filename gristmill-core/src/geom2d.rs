@@ -84,15 +84,6 @@ impl From<Size> for IVec2 {
         }
     }
 }
-impl From<Size> for vulkano::image::ImageDimensions {
-    fn from(size: Size) -> Self {
-        vulkano::image::ImageDimensions::Dim2d {
-            width: size.width,
-            height: size.height,
-            array_layers: 1,
-        }
-    }
-}
 
 #[derive(Copy, Clone, PartialEq, Default, Debug, Serialize, Deserialize)]
 pub struct Rect {

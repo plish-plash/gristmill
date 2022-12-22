@@ -1,42 +1,55 @@
 use crate::{
-    widget::{Widget, WidgetInput},
-    Gui, GuiDraw, GuiLayout, GuiNode, GuiNodeExt, GuiNodeObj, WidgetState,
+    widget::{StyleQuery, Widget, WidgetBehavior, WidgetInput, WidgetNode},
+    Gui, GuiDraw, GuiLayout, GuiNode, GuiNodeExt, GuiNodeId, GuiNodeStorage,
 };
-use std::sync::{Arc, RwLock};
+use std::{any::Any, rc::Rc};
 
-struct PanelState(GuiNodeObj);
+struct PanelBehavior(GuiNodeId);
 
-impl WidgetState for PanelState {
-    fn update(&mut self, _input: WidgetInput) {
+impl WidgetBehavior for PanelBehavior {
+    fn update(&self, nodes: &mut GuiNodeStorage, _input: &WidgetInput) {
         // Changes to flags don't propagate until next frame.
-        self.0.write().flags.visible = false;
+        if let Some(node) = nodes.get_mut(self.0) {
+            node.flags.visible = false;
+        }
     }
 }
 
-pub struct Panel(GuiNodeObj, Arc<RwLock<PanelState>>);
+pub struct Panel(GuiNodeId, Rc<PanelBehavior>);
 
 impl Panel {
-    pub fn show(&self) {
-        self.set_visible(true);
+    pub fn show(&self, gui: &mut Gui) {
+        self.set_visible(gui, true);
     }
-    pub fn set_background(&self, draw: GuiDraw) {
-        self.0.write().draw = draw;
+    pub fn set_background(&self, gui: &mut Gui, draw: GuiDraw) {
+        if let Some(node) = self.node_data(gui) {
+            node.draw = draw;
+        }
     }
 }
 
 impl Widget for Panel {
-    fn class_name() -> &'static str {
-        "panel"
+    fn type_name() -> &'static str {
+        "Panel"
     }
-    fn new(gui: &mut Gui, parent: GuiNodeObj) -> Self {
-        let node = parent.add_child(GuiNode {
-            layout: GuiLayout::fill(),
-            ..Default::default()
-        });
-        let state = gui.register_widget_state(PanelState(node.clone()));
-        Panel(node, state)
+    fn new(gui: &mut Gui, parent: GuiNodeId, _style: StyleQuery) -> Self {
+        let node = parent.add_child(
+            gui,
+            GuiNode {
+                layout: GuiLayout::fill(),
+                ..Default::default()
+            },
+        );
+        let behavior = gui.register_behavior(PanelBehavior(node));
+        Panel(node, behavior)
     }
-    fn node(&self) -> &GuiNodeObj {
-        &self.0
+}
+
+impl WidgetNode for Panel {
+    fn as_any_box(self: Box<Self>) -> Box<dyn Any> {
+        self
+    }
+    fn node(&self) -> GuiNodeId {
+        self.0
     }
 }

@@ -1,6 +1,8 @@
 use bytemuck::{Pod, Zeroable};
 use gristmill::{
-    input::InputActions, render::RenderContext, run_game, Color, Game, GameRenderer, GameWindow,
+    input::InputSystem,
+    render::Renderable,
+    {render::RenderContext, run_game, Game, GameWindow},
 };
 use std::sync::Arc;
 use vulkano::{
@@ -76,8 +78,8 @@ pub struct ExampleRenderer {
     vertex_buffer: Arc<CpuAccessibleBuffer<[Vertex]>>,
 }
 
-impl GameRenderer for ExampleRenderer {
-    fn new(context: &mut RenderContext) -> Self {
+impl ExampleRenderer {
+    pub fn new(context: &mut RenderContext) -> Self {
         let pipeline = ExamplePipeline::new(context);
 
         let vertices = [
@@ -107,9 +109,6 @@ impl GameRenderer for ExampleRenderer {
             vertex_buffer,
         }
     }
-}
-
-impl ExampleRenderer {
     pub fn render(&self, context: &mut RenderContext) {
         self.pipeline.bind(context);
         context
@@ -120,25 +119,39 @@ impl ExampleRenderer {
     }
 }
 
-struct TriangleGame;
+struct TriangleGame {
+    input_system: InputSystem,
+    renderer: ExampleRenderer,
+}
+
+impl TriangleGame {
+    fn new(context: &mut RenderContext) -> Self {
+        TriangleGame {
+            input_system: InputSystem::load_bindings(),
+            renderer: ExampleRenderer::new(context),
+        }
+    }
+}
+
+impl Renderable for TriangleGame {
+    fn pre_render(&mut self, _context: &mut RenderContext) {}
+    fn render(&mut self, context: &mut RenderContext) {
+        self.renderer.render(context);
+    }
+}
 
 impl Game for TriangleGame {
-    type Renderer = ExampleRenderer;
-
-    fn update(&mut self, window: &mut GameWindow, input: &InputActions, _delta: f64) -> Option<()> {
-        if input.get("exit")?.pressed() {
+    fn input_system(&mut self) -> &mut InputSystem {
+        &mut self.input_system
+    }
+    fn update(&mut self, window: &mut GameWindow, _delta: f64) {
+        let input_actions = self.input_system.actions();
+        if input_actions.get("exit").just_pressed() {
             window.close();
         }
-        Some(())
-    }
-
-    fn render(&mut self, context: &mut RenderContext, renderer: &mut ExampleRenderer) {
-        context.begin_render_pass(Color::new(0.0, 0.0, 1.0, 1.0));
-        renderer.render(context);
-        context.end_render_pass();
     }
 }
 
 fn main() {
-    run_game(|| TriangleGame);
+    run_game(TriangleGame::new);
 }

@@ -1,7 +1,7 @@
-pub mod texture;
+mod texture;
 pub mod texture_rect;
 
-use crate::{color::Pixel, geom2d::Rect, math::Vec2, Color, Game};
+use gristmill_core::{geom2d::Rect, math::Vec2, Color};
 use std::sync::Arc;
 use vulkano::{
     command_buffer::{
@@ -14,7 +14,7 @@ use vulkano::{
     device::{
         physical::PhysicalDeviceType, Device, DeviceCreateInfo, DeviceExtensions, QueueCreateInfo,
     },
-    format::Format,
+    format::{ClearValue, Format},
     image::{view::ImageView, AttachmentImage, ImageAccess, ImageUsage, SwapchainImage},
     instance::{Instance, InstanceCreateInfo},
     memory::allocator::StandardMemoryAllocator,
@@ -33,6 +33,13 @@ use winit::{
     event_loop::EventLoop,
     window::{Window, WindowBuilder},
 };
+
+pub use texture::*;
+
+pub trait Renderable {
+    fn pre_render(&mut self, context: &mut RenderContext);
+    fn render(&mut self, context: &mut RenderContext);
+}
 
 /// This method is called once during initialization, then again whenever the window is resized
 fn window_size_dependent_setup(
@@ -77,15 +84,17 @@ pub struct RenderContext {
 
     swapchain: Arc<Swapchain>,
     framebuffers: Vec<Arc<Framebuffer>>,
+    clear_color: Color,
     recreate_swapchain: bool,
     previous_frame_end: Option<Box<dyn GpuFuture>>,
 
     current_builder: Option<AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>>,
     current_framebuffer_index: usize,
+    recently_resized: bool,
 }
 
 impl RenderContext {
-    pub(crate) fn create_window(event_loop: &EventLoop<()>) -> Self {
+    pub fn create_window(event_loop: &EventLoop<()>) -> Self {
         let library = VulkanLibrary::new().unwrap();
         let required_extensions = vulkano_win::required_extensions(&library);
         let instance = Instance::new(
@@ -245,23 +254,26 @@ impl RenderContext {
             viewport,
             swapchain,
             framebuffers,
+            clear_color: Color::WHITE,
             recreate_swapchain: false,
             previous_frame_end: None,
             current_builder: Some(uploads),
             current_framebuffer_index: 0,
+            recently_resized: false,
         }
     }
-    pub(crate) fn window(&self) -> &Window {
+    pub fn window(&self) -> &Window {
         self.surface
             .object()
             .unwrap()
             .downcast_ref::<Window>()
             .unwrap()
     }
-    pub(crate) fn on_resize(&mut self) {
+    pub fn on_resize(&mut self) {
         self.recreate_swapchain = true;
+        self.recently_resized = true;
     }
-    pub(crate) fn finish_setup(&mut self) {
+    pub fn finish_setup(&mut self) {
         let uploads = self.current_builder.take().unwrap();
         self.previous_frame_end = Some(
             uploads
@@ -273,15 +285,15 @@ impl RenderContext {
         );
     }
 
-    pub fn begin_render_pass(&mut self, clear_color: Color) {
+    fn begin_render_pass(&mut self) {
         self.current_builder
             .as_mut()
             .expect("not rendering")
             .begin_render_pass(
                 RenderPassBeginInfo {
                     clear_values: vec![
-                        Some(clear_color.into_raw::<[f32; 4]>().into()),
-                        Some(1f32.into()),
+                        Some(ClearValue::Float(self.clear_color.into())),
+                        Some(ClearValue::Depth(1.0)),
                     ],
                     ..RenderPassBeginInfo::framebuffer(
                         self.framebuffers[self.current_framebuffer_index].clone(),
@@ -292,10 +304,14 @@ impl RenderContext {
             .unwrap()
             .set_viewport(0, [self.viewport.clone()]);
     }
-    pub fn end_render_pass(&mut self) {
+    fn end_render_pass(&mut self) {
         self.builder().end_render_pass().unwrap();
     }
-    pub(crate) fn render<G: Game>(&mut self, game: &mut G, renderer: &mut G::Renderer) {
+    pub fn render_game<R: Renderable>(&mut self, game: &mut R) {
+        if self.current_builder.is_some() {
+            panic!("Do not call render_game here!");
+        }
+
         // Do not draw frame when screen dimensions are zero.
         let dimensions = self.window().inner_size();
         if dimensions.width == 0 || dimensions.height == 0 {
@@ -349,9 +365,13 @@ impl RenderContext {
             .unwrap(),
         );
         self.current_framebuffer_index = image_index as usize;
-        game.render(self, renderer);
-
+        game.pre_render(self);
+        self.begin_render_pass();
+        game.render(self);
+        self.end_render_pass();
         let command_buffer = self.current_builder.take().unwrap().build().unwrap();
+        self.recently_resized = false;
+
         let future = self
             .previous_frame_end
             .take()
@@ -394,6 +414,9 @@ impl RenderContext {
     pub fn descriptor_set_allocator(&self) -> &StandardDescriptorSetAllocator {
         &self.descriptor_set_allocator
     }
+    pub fn was_resized(&self) -> bool {
+        self.recently_resized
+    }
     pub fn viewport(&self) -> Rect {
         Rect::new(
             Vec2::from(self.viewport.origin),
@@ -402,5 +425,12 @@ impl RenderContext {
     }
     pub fn builder(&mut self) -> &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer> {
         self.current_builder.as_mut().expect("not rendering")
+    }
+
+    pub fn clear_color(&self) -> Color {
+        self.clear_color
+    }
+    pub fn set_clear_color(&mut self, clear_color: Color) {
+        self.clear_color = clear_color;
     }
 }

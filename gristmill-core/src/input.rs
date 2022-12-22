@@ -1,11 +1,12 @@
+use crate::{
+    asset::{Asset, AssetCategory, AssetResult, AssetWrite, AssetWriteExt, BufReader, BufWriter},
+    math::Vec2,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use winit::event::{
     DeviceEvent, ElementState, Event, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent,
 };
-
-use crate::asset::{Asset, AssetResult, AssetWrite, BufReader, BufWriter};
-use crate::math::Vec2;
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum InputState {
@@ -53,6 +54,13 @@ impl InputState {
     }
 }
 
+impl Default for InputState {
+    fn default() -> Self {
+        InputState::Button(false)
+    }
+}
+
+#[derive(Copy, Clone, Default)]
 pub struct ActionState {
     changed: bool,
     state: InputState,
@@ -99,6 +107,7 @@ impl ActionState {
     }
 }
 
+#[derive(Default)]
 pub struct InputActions(HashMap<String, ActionState>);
 
 impl InputActions {
@@ -119,12 +128,12 @@ impl InputActions {
     pub fn try_get(&self, key: &str) -> Option<&ActionState> {
         self.0.get(key)
     }
-    pub fn get(&self, key: &str) -> Option<&ActionState> {
+    pub fn get(&self, key: &str) -> ActionState {
         if let Some(state) = self.0.get(key) {
-            Some(state)
+            *state
         } else {
             log::error!("Input action \"{}\" not bound.", key);
-            None
+            ActionState::default()
         }
     }
 }
@@ -424,6 +433,9 @@ impl InputBindings {
 }
 
 impl Asset for InputBindings {
+    fn category() -> AssetCategory {
+        AssetCategory::CONFIG
+    }
     fn read_from(reader: BufReader) -> AssetResult<Self> {
         crate::asset::util::read_yaml(reader)
     }
@@ -441,11 +453,27 @@ pub struct InputSystem {
 }
 
 impl InputSystem {
-    pub fn new(bindings: InputBindings) -> InputSystem {
+    pub fn new(bindings: InputBindings) -> Self {
         InputSystem {
             actions: bindings.create_actions(),
             bindings,
         }
+    }
+    pub fn load_bindings() -> Self {
+        let bindings = InputBindings::load_or_save("controls.yaml", || {
+            type Key = VirtualKeyCode;
+            let mut controls = InputBindings::default();
+            controls.add_mouse_button("primary", MouseButtonBinding::new(MouseButton::Left));
+            controls.add_mouse_button("secondary", MouseButtonBinding::new(MouseButton::Right));
+            controls.add_mouse_motion("look", MouseMotionBinding::new(0.1));
+            controls.add_key("console", KeyBinding::new(Key::Grave));
+            controls.add_key("exit", KeyBinding::new(Key::Escape));
+            controls.add_key_axis2("move", KeyAxis2Binding::new(Key::W, Key::S, Key::A, Key::D));
+            controls.add_key("jump", KeyBinding::new(Key::Space));
+            controls.add_key_axis1("fly", KeyAxis1Binding::new(Key::Space, Key::LShift));
+            controls
+        });
+        Self::new(bindings)
     }
 
     pub fn actions(&self) -> &InputActions {

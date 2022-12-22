@@ -1,11 +1,10 @@
-use crate::{
-    geom2d::Rect,
-    render::{texture::Texture, RenderContext},
-    Color, GameRenderer,
-};
+use crate::{RenderContext, Texture};
 use bytemuck::{Pod, Zeroable};
-use image::{Rgba, RgbaImage};
-use palette::Pixel;
+use gristmill_core::{
+    asset::image::{Rgba, RgbaImage},
+    geom2d::Rect,
+    Color,
+};
 use std::{cmp::Ordering, collections::HashMap, ptr::null, sync::Arc};
 use vulkano::{
     buffer::{BufferUsage, CpuBufferPool, DeviceLocalBuffer},
@@ -169,7 +168,7 @@ impl TextureRect {
                 self.rect.size.y / viewport_extents.y,
             ],
             uv_rect: self.uv_rect.into(),
-            color: self.color.into_raw(),
+            color: self.color.into(),
         }
     }
 }
@@ -216,8 +215,8 @@ pub struct TextureRectRenderer {
     draw_queue: Vec<TextureRect>,
 }
 
-impl GameRenderer for TextureRectRenderer {
-    fn new(context: &mut RenderContext) -> Self {
+impl TextureRectRenderer {
+    pub fn new(context: &mut RenderContext) -> Self {
         TextureRectRenderer {
             pipeline: TextureRectPipeline::new(context),
             texture_descriptors: HashMap::new(),
@@ -233,9 +232,7 @@ impl GameRenderer for TextureRectRenderer {
             draw_queue: Vec::new(),
         }
     }
-}
 
-impl TextureRectRenderer {
     pub fn remove(&mut self, texture: &Texture) {
         self.texture_descriptors.remove(texture);
     }

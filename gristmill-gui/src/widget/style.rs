@@ -1,14 +1,13 @@
-use gristmill::{
-    asset::{Asset, AssetError, AssetResult, AssetWrite, BufReader, BufWriter},
-    color::Pixel,
-    color::{LinSrgb, WithAlpha},
-    geom2d::Size,
-    render::{
-        texture::{Texture, TextureStorage},
-        RenderContext,
+use crate::Gui;
+use gristmill_core::{
+    asset::{
+        Asset, AssetCategory, AssetError, AssetResult, AssetStorage, AssetWrite, BufReader,
+        BufWriter,
     },
+    geom2d::Size,
     Color,
 };
+use gristmill_render::{RenderContext, Texture, TextureStorage};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use toml::value::{Array, Table, Value};
@@ -66,9 +65,9 @@ impl FromStyleValue for Color {
         if let Value::Array(array) = value {
             if let Some(array) = convert_f32_array(array) {
                 if array.len() == 3 {
-                    return Some(LinSrgb::from_raw(&array[0..3]).with_alpha(1.0));
+                    return Some(Color::new_opaque(array[0], array[1], array[2]));
                 } else if array.len() == 4 {
-                    return Some(*Color::from_raw(&array[0..4]));
+                    return Some(Color::new(array[0], array[1], array[2], array[3]));
                 }
             }
         }
@@ -78,9 +77,12 @@ impl FromStyleValue for Color {
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct WidgetStyles(toml::value::Table);
+pub struct WidgetStyles(Table);
 
 impl Asset for WidgetStyles {
+    fn category() -> AssetCategory {
+        AssetCategory::CONFIG
+    }
     fn read_from(mut reader: BufReader) -> AssetResult<Self> {
         let mut string = String::new();
         reader.read_to_string(&mut string)?;
@@ -104,9 +106,9 @@ impl WidgetStyles {
     pub(crate) fn with_all_defaults() -> Self {
         use super::*;
         let mut styles = Self::new();
-        styles.insert(Image::class_name(), Image::default_style());
-        styles.insert(Text::class_name(), Text::default_style());
-        styles.insert(Button::class_name(), Button::default_style());
+        styles.insert(Image::type_name(), Image::default_style());
+        styles.insert(Text::type_name(), Text::default_style());
+        styles.insert(Button::type_name(), Button::default_style());
         styles
     }
 
@@ -117,8 +119,7 @@ impl WidgetStyles {
         self.0.insert(class.to_owned(), Value::Table(values));
     }
 
-    pub fn load_textures(&self, context: &mut RenderContext) {
-        let textures = TextureStorage::assets();
+    pub fn load_textures(&self, context: &mut RenderContext, textures: &mut AssetStorage<Texture>) {
         for values in self.0.values().filter_map(|v| v.as_table()) {
             for value in values.values() {
                 if let Value::Table(table) = value {
@@ -143,6 +144,7 @@ impl WidgetStyles {
     }
 }
 
+#[derive(Default)]
 pub struct StyleQuery<'a>(Vec<&'a StyleValues>);
 
 impl<'a> StyleQuery<'a> {
@@ -157,11 +159,11 @@ impl<'a> StyleQuery<'a> {
         }
         None
     }
-    pub fn get_texture(&self, key: &str) -> Option<Texture> {
+    pub fn get_texture(&self, gui: &Gui, key: &str) -> Option<Texture> {
         for values in self.0.iter() {
             if let Some(Value::Table(table)) = values.get(key) {
                 if let Some(Value::String(texture)) = table.get("texture") {
-                    return TextureStorage::assets().get(texture);
+                    return gui.textures.get(texture).cloned();
                 }
             }
         }

@@ -1,6 +1,9 @@
 [workspace]
 members = [
     "gristmill",
+    "gristmill-core",
+    "gristmill-macros",
+    "gristmill-render",
     "gristmill-gui",
     "examples",
 ]

@@ -1,16 +1,15 @@
-use crate::widget::StyleValue;
 use crate::{
-    widget::{StyleQuery, StyleValues, Widget},
-    Gui, GuiDraw, GuiFlags, GuiLayout, GuiNode, GuiNodeExt, GuiNodeObj,
+    widget::{StyleQuery, StyleValue, StyleValues, Widget, WidgetNode},
+    Gui, GuiDraw, GuiFlags, GuiNode, GuiNodeExt, GuiNodeId,
 };
-use gristmill::{
-    color::Pixel,
+use gristmill_core::{
     geom2d::{IRect, Size},
-    render::texture::Texture,
     Color,
 };
+use gristmill_render::Texture;
+use std::any::Any;
 
-pub struct Image(GuiNodeObj);
+pub struct Image(GuiNodeId);
 
 impl Image {
     const DEFAULT_SIZE: Size = Size {
@@ -18,11 +17,15 @@ impl Image {
         height: 64,
     };
 
-    pub fn set_texture(&self, texture: Option<Texture>) {
-        self.0.write().draw = GuiDraw::Rect(texture, crate::color::WHITE);
+    pub fn set_texture(&self, gui: &mut Gui, texture: Option<Texture>) {
+        if let Some(node) = self.node_data(gui) {
+            node.draw = GuiDraw::Rect(texture, Color::WHITE);
+        }
     }
-    pub fn set_texture_and_color(&self, texture: Option<Texture>, color: Color) {
-        self.0.write().draw = GuiDraw::Rect(texture, color);
+    pub fn set_texture_and_color(&self, gui: &mut Gui, texture: Option<Texture>, color: Color) {
+        if let Some(node) = self.node_data(gui) {
+            node.draw = GuiDraw::Rect(texture, color);
+        }
     }
 
     pub(crate) fn default_style() -> StyleValues {
@@ -33,7 +36,7 @@ impl Image {
         );
         style.insert(
             "color".to_owned(),
-            StyleValue::try_from(crate::color::WHITE.into_raw::<[f32; 4]>()).unwrap(),
+            StyleValue::try_from(<[f32; 4]>::from(Color::WHITE)).unwrap(),
         );
         style.insert(
             "size".to_owned(),
@@ -44,32 +47,33 @@ impl Image {
 }
 
 impl Widget for Image {
-    fn class_name() -> &'static str {
-        "image"
+    fn type_name() -> &'static str {
+        "Image"
     }
-    fn new(_gui: &mut Gui, parent: GuiNodeObj) -> Self {
+    fn new(gui: &mut Gui, parent: GuiNodeId, style: StyleQuery) -> Self {
         let flags = GuiFlags {
             pointer_opaque: true,
             ..Default::default()
         };
-        let draw = GuiDraw::Rect(None, crate::color::WHITE);
-        let node = parent.add_child(GuiNode::new(
-            flags,
-            draw,
-            IRect::from_size(Image::DEFAULT_SIZE),
-        ));
+        let texture = style.get_texture(gui, "texture");
+        let color = style.get("color").unwrap_or(Color::WHITE);
+        let node = parent.add_child(
+            gui,
+            GuiNode::new(
+                flags,
+                GuiDraw::Rect(texture, color),
+                IRect::from_size(style.get("size").unwrap_or(Image::DEFAULT_SIZE)),
+            ),
+        );
         Image(node)
     }
-    fn apply_style(&mut self, style: StyleQuery) {
-        let mut write_guard = self.0.write();
-        let texture = style.get_texture("texture");
-        write_guard.draw =
-            GuiDraw::Rect(texture, style.get("color").unwrap_or(crate::color::WHITE));
-        write_guard.layout = GuiLayout::Child(IRect::from_size(
-            style.get("size").unwrap_or(Image::DEFAULT_SIZE),
-        ));
+}
+
+impl WidgetNode for Image {
+    fn as_any_box(self: Box<Self>) -> Box<dyn Any> {
+        self
     }
-    fn node(&self) -> &GuiNodeObj {
-        &self.0
+    fn node(&self) -> GuiNodeId {
+        self.0
     }
 }

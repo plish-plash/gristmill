@@ -1,17 +1,28 @@
-use crate::{asset::Asset, geom2d::Size, render::RenderContext};
-use image::DynamicImage;
-use once_cell::sync::Lazy;
-use std::{
-    collections::HashMap,
-    hash::Hash,
-    sync::{Arc, RwLock},
+use crate::RenderContext;
+use gristmill_core::{
+    asset::{image::DynamicImage, AssetExt, AssetStorage},
+    geom2d::Size,
 };
+use std::{hash::Hash, sync::Arc};
 use vulkano::{
     format::Format,
     image::view::{ImageView, ImageViewCreateInfo},
     image::{ImageAccess, ImageDimensions, ImageViewAbstract, ImmutableImage, MipmapsCount},
     sampler::{ComponentMapping, ComponentSwizzle},
 };
+
+pub trait ImageDimensionsExt {
+    fn from_size(size: Size) -> Self;
+}
+impl ImageDimensionsExt for ImageDimensions {
+    fn from_size(size: Size) -> Self {
+        ImageDimensions::Dim2d {
+            width: size.width,
+            height: size.height,
+            array_layers: 1,
+        }
+    }
+}
 
 #[allow(clippy::derive_hash_xor_eq)]
 #[derive(Clone, Hash)]
@@ -92,7 +103,7 @@ impl Texture {
         let vk_image = ImmutableImage::from_iter(
             &allocator,
             image.as_bytes().iter().cloned(),
-            dimensions.into(),
+            ImageDimensions::from_size(dimensions),
             MipmapsCount::One,
             format,
             context.builder(),
@@ -118,44 +129,20 @@ impl PartialEq for Texture {
 }
 impl Eq for Texture {}
 
-static TEXTURE_STORAGE_ASSETS: Lazy<TextureStorage> = Lazy::new(|| TextureStorage::new("assets"));
-
-#[derive(Clone)]
-pub struct TextureStorage {
-    prefix: &'static str,
-    textures: Arc<RwLock<HashMap<String, Texture>>>,
+pub trait TextureStorage {
+    fn load(&mut self, context: &mut RenderContext, asset_path: &str) -> Option<&Texture>;
 }
 
-impl TextureStorage {
-    pub fn new(prefix: &'static str) -> Self {
-        TextureStorage {
-            prefix,
-            textures: Arc::default(),
+impl TextureStorage for AssetStorage<Texture> {
+    fn load(&mut self, context: &mut RenderContext, asset_path: &str) -> Option<&Texture> {
+        if !self.contains(asset_path) {
+            if let Some(image) = DynamicImage::load(asset_path) {
+                let asset = Texture::load(context, &image);
+                self.insert(asset_path.to_owned(), asset);
+            } else {
+                log::error!("Failed to load texture \"{}\".", asset_path);
+            }
         }
-    }
-    pub fn assets() -> &'static Self {
-        &TEXTURE_STORAGE_ASSETS
-    }
-
-    pub fn load(&self, context: &mut RenderContext, asset_path: &str) -> Option<Texture> {
-        let mut write_guard = self.textures.try_write().unwrap();
-        if let Some(texture) = write_guard.get(asset_path) {
-            Some(texture.clone())
-        } else if let Some(image) = DynamicImage::load(self.prefix, asset_path) {
-            let texture = Texture::load(context, &image);
-            write_guard.insert(asset_path.to_owned(), texture.clone());
-            Some(texture)
-        } else {
-            log::error!("Failed to load texture \"{}\".", asset_path);
-            None
-        }
-    }
-    pub fn get(&self, asset_path: &str) -> Option<Texture> {
-        if let Some(texture) = self.textures.try_read().unwrap().get(asset_path) {
-            Some(texture.clone())
-        } else {
-            log::error!("Texture \"{}\" hasn't been loaded.", asset_path);
-            None
-        }
+        self.get(asset_path)
     }
 }

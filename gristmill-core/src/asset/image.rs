@@ -1,10 +1,12 @@
-use crate::asset::{Asset, AssetError, AssetResult, BufReader};
-use image::{io::Reader, ImageError};
-pub use image::{DynamicImage, ImageBuffer};
+use crate::asset::{Asset, AssetCategory, AssetError, AssetResult, BufReader};
+pub use image::*;
 
 impl Asset for DynamicImage {
+    fn category() -> AssetCategory {
+        AssetCategory::ASSET
+    }
     fn read_from(reader: BufReader) -> AssetResult<Self> {
-        Ok(Reader::new(reader).with_guessed_format()?.decode()?)
+        Ok(io::Reader::new(reader).with_guessed_format()?.decode()?)
     }
 }
 impl From<ImageError> for AssetError {

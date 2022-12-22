@@ -6,6 +6,9 @@
       <sourceFolder url="file://$MODULE_DIR$/gristmill-gui/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/gristmill/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/examples/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/gristmill-core/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/gristmill-render/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/gristmill-macros/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />
