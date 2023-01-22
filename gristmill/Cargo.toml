@@ -6,6 +6,7 @@ edition = "2021"
 
 [dependencies]
 gristmill-core = { path = "../gristmill-core" }
+gristmill-macros = { path = "../gristmill-macros" }
 gristmill-render = { path = "../gristmill-render" }
 gristmill-gui = { path = "../gristmill-gui" }
 winit = "0.27"

@@ -12,7 +12,7 @@ pub use text::*;
 
 use crate::{Gui, GuiLayout, GuiNode, GuiNodeId, GuiNodeStorage};
 use gristmill_core::input::ActionState;
-use std::any::Any;
+use std::{any::Any, collections::HashMap};
 
 pub struct WidgetInput {
     pub state: ActionState,
@@ -27,6 +27,8 @@ pub trait Widget: Sized {
 pub trait WidgetNode: 'static {
     fn as_any_box(self: Box<Self>) -> Box<dyn Any>;
     fn node(&self) -> GuiNodeId;
+    fn unpack_extra_fields(&self, _gui: &mut Gui, _fields: &HashMap<String, StyleValue>) {}
+
     fn node_data<'a>(&self, gui: &'a mut Gui) -> Option<&'a mut GuiNode> {
         gui.nodes.get_mut(self.node())
     }

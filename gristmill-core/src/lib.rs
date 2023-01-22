@@ -15,13 +15,13 @@ impl Color {
     pub const GREEN: Color = Color([0., 1., 0., 1.]);
     pub const BLUE: Color = Color([0., 0., 1., 1.]);
 
-    pub fn new(r: f32, g: f32, b: f32, a: f32) -> Self {
+    pub const fn new(r: f32, g: f32, b: f32, a: f32) -> Self {
         Color([r, g, b, a])
     }
-    pub fn new_opaque(r: f32, g: f32, b: f32) -> Self {
+    pub const fn new_opaque(r: f32, g: f32, b: f32) -> Self {
         Self::new(r, g, b, 1.0)
     }
-    pub fn new_value(value: f32) -> Self {
+    pub const fn new_value(value: f32) -> Self {
         Self::new(value, value, value, 1.0)
     }
 }

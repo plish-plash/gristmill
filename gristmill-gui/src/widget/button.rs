@@ -10,7 +10,7 @@ use gristmill_core::{
     Color,
 };
 use gristmill_render::Texture;
-use std::{any::Any, cell::Cell, rc::Rc};
+use std::{any::Any, cell::Cell, collections::HashMap, rc::Rc};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ButtonState {
@@ -189,5 +189,10 @@ impl WidgetNode for Button {
     }
     fn node(&self) -> GuiNodeId {
         self.node
+    }
+    fn unpack_extra_fields(&self, gui: &mut Gui, fields: &HashMap<String, StyleValue>) {
+        if let Some(label) = fields.get("label").and_then(|value| value.as_str()) {
+            self.set_label_string(gui, label);
+        }
     }
 }

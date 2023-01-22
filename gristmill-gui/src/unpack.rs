@@ -28,21 +28,29 @@ impl Asset for PackedNode {
 }
 
 impl PackedNode {
-    fn unpack(&self, gui: &mut Gui, parent: GuiNodeId, widgets: &mut UnpackedWidgets) {
+    fn unpack(
+        &self,
+        gui: &mut Gui,
+        parent: GuiNodeId,
+        widgets: &mut UnpackedWidgets,
+    ) -> Option<GuiNodeId> {
         if let Some(type_unpacker) = gui.unpacker.types.get(&self.r#type) {
             let widget = type_unpacker(gui, parent, self.class.as_deref());
             if let Some(layout) = self.layout {
                 widget.set_layout(gui, layout);
             }
+            widget.unpack_extra_fields(gui, &self.extra);
             let widget_node = widget.node();
             if !self.name.is_empty() {
-                widgets.0.insert(self.name.clone(), widget);
+                widgets.1.insert(self.name.clone(), widget);
             }
             for child in self.children.iter() {
                 child.unpack(gui, widget_node, widgets);
             }
+            Some(widget_node)
         } else {
             log::error!("Unable to unpack widget of type {}.", &self.r#type);
+            None
         }
     }
 }
@@ -81,14 +89,17 @@ impl Unpacker {
 }
 
 #[derive(Default)]
-pub struct UnpackedWidgets(HashMap<String, Box<dyn WidgetNode>>);
+pub struct UnpackedWidgets(Option<GuiNodeId>, HashMap<String, Box<dyn WidgetNode>>);
 
 impl UnpackedWidgets {
     pub fn new() -> Self {
         Default::default()
     }
+    pub fn root(&self) -> Option<GuiNodeId> {
+        self.0
+    }
     pub fn get<W: WidgetNode>(&mut self, name: &str) -> Option<W> {
-        if let Some(widget) = self.0.remove(name) {
+        if let Some(widget) = self.1.remove(name) {
             if let Ok(cast) = widget.as_any_box().downcast::<W>() {
                 Some(*cast)
             } else {
@@ -108,7 +119,7 @@ pub trait PackedWidget: Sized {
     fn load(gui: &mut Gui, parent: GuiNodeId) -> Option<Self> {
         let mut widgets = UnpackedWidgets::new();
         let packed_node = gui.unpacker.storage.load(Self::asset_path())?;
-        packed_node.unpack(gui, parent, &mut widgets);
+        widgets.0 = packed_node.unpack(gui, parent, &mut widgets);
         Self::new(widgets)
     }
 }

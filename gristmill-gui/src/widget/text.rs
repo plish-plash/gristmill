@@ -7,10 +7,9 @@ use gristmill_core::{
     geom2d::{IRect, Size},
     math::IVec2,
 };
-use serde::{Deserialize, Serialize};
-use std::any::Any;
+use std::{any::Any, collections::HashMap, str::FromStr};
 
-#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum TextAlign {
     Left,
     Right,
@@ -21,6 +20,24 @@ pub enum TextAlign {
     LeftWrap,
     RightWrap,
     CenterWrap,
+}
+
+impl FromStr for TextAlign {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "left" | "Left" => Ok(TextAlign::Left),
+            "right" | "Right" => Ok(TextAlign::Right),
+            "center" | "Center" => Ok(TextAlign::Center),
+            "middle" | "Middle" => Ok(TextAlign::Middle),
+            "middle_left" | "MiddleLeft" => Ok(TextAlign::MiddleLeft),
+            "middle_right" | "MiddleRight" => Ok(TextAlign::MiddleRight),
+            "left_wrap" | "LeftWrap" => Ok(TextAlign::LeftWrap),
+            "right_wrap" | "RightWrap" => Ok(TextAlign::RightWrap),
+            "center_wrap" | "CenterWrap" => Ok(TextAlign::CenterWrap),
+            _ => Err(()),
+        }
+    }
 }
 
 impl From<TextAlign> for Layout<BuiltInLineBreaker> {
@@ -138,5 +155,17 @@ impl WidgetNode for Text {
     }
     fn node(&self) -> GuiNodeId {
         self.node
+    }
+    fn unpack_extra_fields(&self, gui: &mut Gui, fields: &HashMap<String, StyleValue>) {
+        if let Some(text) = fields.get("text").and_then(|value| value.as_str()) {
+            self.set_text_string(gui, text);
+        }
+        if let Some(align) = fields
+            .get("align")
+            .and_then(|value| value.as_str())
+            .and_then(|value| value.parse().ok())
+        {
+            self.set_align(gui, align);
+        }
     }
 }

@@ -2,6 +2,7 @@ mod console;
 
 pub use gristmill_core::*;
 pub use gristmill_gui as gui;
+pub use gristmill_macros::*;
 pub use gristmill_render as render;
 
 use crate::console::{ConsoleGame, LogRecord};
