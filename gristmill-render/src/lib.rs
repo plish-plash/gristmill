@@ -372,11 +372,10 @@ impl RenderContext {
         let command_buffer = self.current_builder.take().unwrap().build().unwrap();
         self.recently_resized = false;
 
-        let future = self
-            .previous_frame_end
-            .take()
-            .unwrap()
-            .join(acquire_future)
+        // Block until the previous frame is finished rendering.
+        drop(self.previous_frame_end.take());
+
+        let future = acquire_future
             .then_execute(self.queue.clone(), command_buffer)
             .unwrap()
             .then_swapchain_present(

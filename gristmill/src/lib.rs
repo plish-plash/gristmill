@@ -8,11 +8,7 @@ pub use gristmill_render as render;
 use crate::console::{ConsoleGame, LogRecord};
 use gristmill_render::RenderContext;
 use log::{Log, Metadata, Record};
-use std::{
-    sync::mpsc,
-    thread,
-    time::{Duration, Instant},
-};
+use std::sync::mpsc;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -80,13 +76,11 @@ impl<G: Game> GameLoop<G> {
         self.context.render_game(&mut self.game);
     }
 
-    fn start(mut self, event_loop: EventLoop<()>) -> ! {
-        const MINIMUM_FRAME_TIME: Duration = Duration::from_millis(15);
-        let mut last_frame_time = Instant::now();
-
+    fn start(self, event_loop: EventLoop<()>) -> ! {
+        type InnerGameLoop<T> = game_loop::GameLoop<T, game_loop::Time, ()>;
+        let mut game_loop = InnerGameLoop::new(self, 120, 0.1, ());
         event_loop.run(move |event, _, control_flow| {
             *control_flow = ControlFlow::Poll;
-
             match event {
                 Event::WindowEvent {
                     event: WindowEvent::CloseRequested,
@@ -95,25 +89,22 @@ impl<G: Game> GameLoop<G> {
                     *control_flow = ControlFlow::Exit;
                 }
                 Event::RedrawRequested(_) => {
-                    self.render();
-                }
-                Event::MainEventsCleared => {
-                    let mut current_frame_time = Instant::now();
-                    let mut delta = current_frame_time.duration_since(last_frame_time);
-                    if delta < MINIMUM_FRAME_TIME {
-                        thread::sleep(MINIMUM_FRAME_TIME - delta);
-                        current_frame_time = Instant::now();
-                        delta = current_frame_time.duration_since(last_frame_time);
-                    }
-                    last_frame_time = current_frame_time;
-                    if self.update(delta.as_secs_f64()) {
-                        self.context.window().request_redraw();
-                    } else {
+                    if !game_loop.next_frame(
+                        |g| {
+                            if !g.game.update(g.last_frame_time()) {
+                                g.exit();
+                            }
+                        },
+                        |g| g.game.render(),
+                    ) {
                         *control_flow = ControlFlow::Exit;
                     }
                 }
+                Event::MainEventsCleared => {
+                    game_loop.game.context.window().request_redraw();
+                }
                 _ => {
-                    self.event(event);
+                    game_loop.game.event(event);
                 }
             }
         })

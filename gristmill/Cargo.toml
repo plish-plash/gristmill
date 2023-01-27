@@ -10,5 +10,6 @@ gristmill-macros = { path = "../gristmill-macros" }
 gristmill-render = { path = "../gristmill-render" }
 gristmill-gui = { path = "../gristmill-gui" }
 winit = "0.27"
+game-loop = "0.10"
 log = "0.4"
 env_logger = "0.10"
