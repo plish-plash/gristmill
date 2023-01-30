@@ -162,21 +162,22 @@ impl Widget for Button {
                 style.get("size").unwrap_or(Size::new(128, 32)),
             )),
         );
-        let node = image.node();
-        gui.nodes.get_mut(node).unwrap().draw = draw.draw(ButtonState::Disabled);
-        let label = Text::new(gui, node, style);
+        let image_node = image.node_data(gui).unwrap();
+        image_node.flags.pointer_opaque = true;
+        image_node.draw = draw.draw(ButtonState::Disabled);
+        let label = Text::new(gui, image.node(), style);
         label.set_layout(gui, GuiLayout::fill());
         label.set_align(gui, TextAlign::Middle);
 
         let behavior = gui.register_behavior(ButtonBehavior {
-            node,
+            node: image.node(),
             draw,
             state: Cell::new(ButtonState::Disabled),
             interactable: Cell::new(false),
             just_released: Cell::new(false),
         });
         Button {
-            node,
+            node: image.node(),
             label,
             behavior,
         }

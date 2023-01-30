@@ -1,6 +1,6 @@
 use crate::{
     widget::{StyleQuery, Widget, WidgetBehavior, WidgetInput, WidgetNode},
-    Gui, GuiDraw, GuiLayout, GuiNode, GuiNodeExt, GuiNodeId, GuiNodeStorage,
+    Gui, GuiDraw, GuiFlags, GuiLayout, GuiNode, GuiNodeExt, GuiNodeId, GuiNodeStorage,
 };
 use std::{any::Any, rc::Rc};
 
@@ -33,9 +33,14 @@ impl Widget for Panel {
         "Panel"
     }
     fn new(gui: &mut Gui, parent: GuiNodeId, _style: StyleQuery) -> Self {
+        let flags = GuiFlags {
+            pointer_opaque: true,
+            ..Default::default()
+        };
         let node = parent.add_child(
             gui,
             GuiNode {
+                flags,
                 layout: GuiLayout::fill(),
                 ..Default::default()
             },

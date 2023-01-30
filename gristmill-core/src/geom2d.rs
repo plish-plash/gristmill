@@ -205,7 +205,7 @@ impl IRect {
         IRect {
             position: IVec2 {
                 x: self.position.x + insets.left,
-                y: self.position.y + insets.right,
+                y: self.position.y + insets.top,
             },
             size: Size {
                 width: if inset_width >= width {

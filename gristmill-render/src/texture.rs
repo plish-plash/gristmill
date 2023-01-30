@@ -7,7 +7,10 @@ use std::{hash::Hash, sync::Arc};
 use vulkano::{
     format::Format,
     image::view::{ImageView, ImageViewCreateInfo},
-    image::{ImageAccess, ImageDimensions, ImageViewAbstract, ImmutableImage, MipmapsCount},
+    image::{
+        immutable::ImmutableImageCreationError, ImageAccess, ImageDimensions, ImageViewAbstract,
+        ImmutableImage, MipmapsCount,
+    },
     sampler::{ComponentMapping, ComponentSwizzle},
 };
 
@@ -96,7 +99,10 @@ impl Texture {
             _ => panic!("unknown image type"),
         }
     }
-    pub fn load(context: &mut RenderContext, image: &DynamicImage) -> Texture {
+    pub fn load(
+        context: &mut RenderContext,
+        image: &DynamicImage,
+    ) -> Result<Texture, ImmutableImageCreationError> {
         let allocator = context.allocator().clone();
         let dimensions = Size::new(image.width(), image.height());
         let (format, component_mapping) = Self::format_info(image);
@@ -107,12 +113,11 @@ impl Texture {
             MipmapsCount::One,
             format,
             context.builder(),
-        )
-        .unwrap();
+        )?;
         let mut image_info = ImageViewCreateInfo::from_image(&vk_image);
         image_info.component_mapping = component_mapping;
         let image_view = ImageView::new(vk_image, image_info).unwrap();
-        Texture(image_view)
+        Ok(Texture(image_view))
     }
 }
 
@@ -137,8 +142,14 @@ impl TextureStorage for AssetStorage<Texture> {
     fn load(&mut self, context: &mut RenderContext, asset_path: &str) -> Option<&Texture> {
         if !self.contains(asset_path) {
             if let Some(image) = DynamicImage::load(asset_path) {
-                let asset = Texture::load(context, &image);
-                self.insert(asset_path.to_owned(), asset);
+                match Texture::load(context, &image) {
+                    Ok(asset) => {
+                        self.insert(asset_path.to_owned(), asset);
+                    }
+                    Err(error) => {
+                        log::error!("Failed to load texture \"{}\": {}.", asset_path, error)
+                    }
+                }
             } else {
                 log::error!("Failed to load texture \"{}\".", asset_path);
             }

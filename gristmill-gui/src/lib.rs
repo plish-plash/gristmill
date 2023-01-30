@@ -177,11 +177,13 @@ impl Gui {
         )
     }
     pub fn with_styles(context: &mut RenderContext, styles: WidgetStyles) -> Self {
+        let mut textures = AssetStorage::new();
+        styles.load_textures(context, &mut textures);
         let mut nodes = GuiNodeStorage::default();
         let root = nodes.insert(GuiNode::default());
         Gui {
             renderer: GuiRenderer::new(context),
-            textures: AssetStorage::new(),
+            textures,
             styles: Rc::new(styles),
             viewport: IRect::ZERO,
             nodes,
@@ -194,8 +196,8 @@ impl Gui {
     pub fn rect_renderer(&mut self) -> &mut TextureRectRenderer {
         self.renderer.rect_renderer()
     }
-    pub fn load_textures(&mut self, context: &mut RenderContext) {
-        self.styles.load_textures(context, &mut self.textures);
+    pub fn textures(&mut self) -> &mut AssetStorage<Texture> {
+        &mut self.textures
     }
 
     pub fn update(&mut self, input: &InputActions) {
@@ -205,7 +207,7 @@ impl Gui {
             node: GuiNodeId,
             parent_rect: IRect,
             parent_visible: bool,
-            z: u16,
+            mut z: u16,
         ) {
             let mut previous_rect = None;
             let children = nodes.get(node).unwrap().children.clone();
@@ -216,7 +218,8 @@ impl Gui {
                 node_data.visible = visible;
                 node_data.rect = rect;
                 node_data.z = z;
-                layout_children(nodes, child, rect, visible, z + 1);
+                z += 1;
+                layout_children(nodes, child, rect, visible, z);
                 previous_rect = Some(rect);
             }
         }
@@ -302,7 +305,7 @@ impl Gui {
     {
         let mut classes = vec![W::type_name()];
         if let Some(class) = class {
-            classes.push(class);
+            classes.insert(0, class);
         }
         let styles = self.styles.clone();
         let style = styles.query(classes);

@@ -51,16 +51,12 @@ impl Widget for Image {
         "Image"
     }
     fn new(gui: &mut Gui, parent: GuiNodeId, style: StyleQuery) -> Self {
-        let flags = GuiFlags {
-            pointer_opaque: true,
-            ..Default::default()
-        };
         let texture = style.get_texture(gui, "texture");
         let color = style.get("color").unwrap_or(Color::WHITE);
         let node = parent.add_child(
             gui,
             GuiNode::new(
-                flags,
+                GuiFlags::default(),
                 GuiDraw::Rect(texture, color),
                 IRect::from_size(style.get("size").unwrap_or(Image::DEFAULT_SIZE)),
             ),
