@@ -1,7 +1,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::Span;
-use quote::quote;
-use syn::{parse_macro_input, Attribute, DeriveInput, Ident, Lit, Meta, MetaNameValue};
+use quote::{quote, quote_spanned};
+use syn::{parse_macro_input, Attribute, DeriveInput, Ident, Lit, Meta, MetaNameValue, Data, Fields, spanned::Spanned};
 
 fn find_category_attribute(attrs: Vec<Attribute>) -> syn::parse::Result<Ident> {
     for attr in attrs {
@@ -47,6 +47,44 @@ pub fn derive_asset_write(input: TokenStream) -> TokenStream {
         impl gristmill::asset::AssetWrite for #name {
             fn write_to(value: &Self, writer: gristmill::asset::BufWriter) -> gristmill::asset::AssetResult<()> {
                 gristmill::asset::util::write_yaml(writer, value)
+            }
+        }
+    };
+    TokenStream::from(output)
+}
+
+#[proc_macro_derive(PackedWidget)]
+pub fn derive_packed_widget(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    let name = input.ident;
+    let asset_path = format!("gui/{}.yaml", name.to_string());
+    let widget_init = if let Data::Struct(ref data) = input.data {
+        if let Fields::Named(ref fields) = data.fields {
+            let recurse = fields.named.iter().map(|field| {
+                let field_ident = &field.ident;
+                let field_name = field_ident.as_ref().map(ToString::to_string).unwrap_or_default();
+                if field_name == "root" {
+                    quote_spanned! { field.span() => #field_ident: widgets.root()? }
+                } else {
+                    quote_spanned! { field.span() => #field_ident: widgets.get(#field_name)? }
+                }
+            });
+            quote! { #(#recurse,)* }
+        } else {
+            panic!("fields must be named");
+        }
+    } else {
+        panic!("not a struct");
+    };
+    let output = quote! {
+        impl gristmill::gui::unpack::PackedWidget for #name {
+            fn asset_path() -> &'static str {
+                #asset_path
+            }
+            fn new(mut widgets: gristmill::gui::unpack::UnpackedWidgets) -> Option<Self> {
+                Some(#name {
+                    #widget_init
+                })
             }
         }
     };
