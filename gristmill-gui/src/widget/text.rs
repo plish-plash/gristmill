@@ -1,72 +1,9 @@
 use crate::{
-    widget::{StyleQuery, StyleValue, StyleValues, Widget, WidgetNode},
-    Gui, GuiDraw, GuiLayout, GuiNode, GuiNodeExt, GuiNodeId,
+    widget::{StyleValues, Widget, WidgetNode, WidgetNodeExt, WidgetStyle},
+    Anchor, Gui, GuiNode, GuiNodeExt, GuiNodeId, NodeDraw,
 };
 use glyph_brush::*;
-use gristmill_core::{
-    geom2d::{IRect, Size},
-    math::IVec2,
-};
-use std::{any::Any, collections::HashMap, str::FromStr};
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum TextAlign {
-    Left,
-    Right,
-    Center,
-    Middle,
-    MiddleLeft,
-    MiddleRight,
-    LeftWrap,
-    RightWrap,
-    CenterWrap,
-}
-
-impl FromStr for TextAlign {
-    type Err = ();
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "left" | "Left" => Ok(TextAlign::Left),
-            "right" | "Right" => Ok(TextAlign::Right),
-            "center" | "Center" => Ok(TextAlign::Center),
-            "middle" | "Middle" => Ok(TextAlign::Middle),
-            "middle_left" | "MiddleLeft" => Ok(TextAlign::MiddleLeft),
-            "middle_right" | "MiddleRight" => Ok(TextAlign::MiddleRight),
-            "left_wrap" | "LeftWrap" => Ok(TextAlign::LeftWrap),
-            "right_wrap" | "RightWrap" => Ok(TextAlign::RightWrap),
-            "center_wrap" | "CenterWrap" => Ok(TextAlign::CenterWrap),
-            _ => Err(()),
-        }
-    }
-}
-
-impl From<TextAlign> for Layout<BuiltInLineBreaker> {
-    fn from(align: TextAlign) -> Self {
-        match align {
-            TextAlign::Left => Layout::default_single_line().h_align(HorizontalAlign::Left),
-            TextAlign::Right => Layout::default_single_line().h_align(HorizontalAlign::Right),
-            TextAlign::Center => Layout::default_single_line().h_align(HorizontalAlign::Center),
-            TextAlign::Middle => Layout::SingleLine {
-                h_align: HorizontalAlign::Center,
-                v_align: VerticalAlign::Center,
-                line_breaker: Default::default(),
-            },
-            TextAlign::MiddleLeft => Layout::SingleLine {
-                h_align: HorizontalAlign::Left,
-                v_align: VerticalAlign::Center,
-                line_breaker: Default::default(),
-            },
-            TextAlign::MiddleRight => Layout::SingleLine {
-                h_align: HorizontalAlign::Right,
-                v_align: VerticalAlign::Center,
-                line_breaker: Default::default(),
-            },
-            TextAlign::LeftWrap => Layout::default_wrap().h_align(HorizontalAlign::Left),
-            TextAlign::RightWrap => Layout::default_wrap().h_align(HorizontalAlign::Right),
-            TextAlign::CenterWrap => Layout::default_wrap().h_align(HorizontalAlign::Center),
-        }
-    }
-}
+use std::any::Any;
 
 struct TextStyle {
     pub font: FontId,
@@ -90,9 +27,35 @@ pub struct Text {
 }
 
 impl Text {
+    fn make_layout(h_align: Anchor, v_align: Anchor, wrap: bool) -> Layout<BuiltInLineBreaker> {
+        let h_align = match h_align {
+            Anchor::Begin => HorizontalAlign::Left,
+            Anchor::Middle => HorizontalAlign::Center,
+            Anchor::End => HorizontalAlign::Right,
+        };
+        let v_align = match v_align {
+            Anchor::Begin => VerticalAlign::Top,
+            Anchor::Middle => VerticalAlign::Center,
+            Anchor::End => VerticalAlign::Bottom,
+        };
+        if wrap {
+            Layout::Wrap {
+                line_breaker: Default::default(),
+                h_align,
+                v_align,
+            }
+        } else {
+            Layout::SingleLine {
+                line_breaker: Default::default(),
+                h_align,
+                v_align,
+            }
+        }
+    }
+
     pub fn set_text(&self, gui: &mut Gui, text: Vec<OwnedText>) {
         if let Some(node) = self.node_data(gui) {
-            if let GuiDraw::Text(section) = &mut node.draw {
+            if let NodeDraw::Text(section) = &mut node.draw {
                 section.text = text;
             }
         }
@@ -107,45 +70,42 @@ impl Text {
             .with_color(<[f32; 4]>::from(self.style.color));
         self.set_text(gui, vec![text]);
     }
-    pub fn set_align(&self, gui: &mut Gui, align: TextAlign) {
+    pub fn set_text_align(&self, gui: &mut Gui, align: (Anchor, Anchor), wrap: bool) {
         if let Some(node) = self.node_data(gui) {
-            if let GuiDraw::Text(section) = &mut node.draw {
-                section.layout = align.into();
+            if let NodeDraw::Text(section) = &mut node.draw {
+                section.layout = Self::make_layout(align.0, align.1, wrap)
             }
         }
-    }
-
-    pub(crate) fn default_style() -> StyleValues {
-        let default = TextStyle::default();
-        let mut style = StyleValues::new();
-        style.insert("font_size".to_owned(), StyleValue::from(default.font_size));
-        style.insert(
-            "color".to_owned(),
-            StyleValue::try_from(<[f32; 4]>::from(default.color)).unwrap(),
-        );
-        style
     }
 }
 
 impl Widget for Text {
-    fn type_name() -> &'static str {
-        "Text"
+    fn class_name() -> &'static str {
+        "text"
     }
-    fn new(gui: &mut Gui, parent: GuiNodeId, style: StyleQuery) -> Self {
+    fn new(gui: &mut Gui, parent: GuiNodeId, mut style: StyleValues) -> Self {
         let mut text_style = TextStyle::default(); // TODO font
-        text_style.font_size = style.get("font_size").unwrap_or(text_style.font_size);
-        text_style.color = style.get("color").unwrap_or(text_style.color);
+        text_style.font_size = style.widget_value("font_size", text_style.font_size);
+        text_style.color = style.widget_value("color", text_style.color);
+        let h_align = style.widget_value("halign", Anchor::Begin);
+        let v_align = style.widget_value("valign", Anchor::Begin);
+        let wrap = style.widget_value("wrap", false);
+        let text = style.widget_value("text", String::new());
         let node = parent.add_child(
             gui,
-            GuiNode::with_draw_and_layout(
-                GuiDraw::Text(OwnedSection::default()),
-                GuiLayout::Child(IRect::new(IVec2::ZERO, Size::new(256, 32))),
+            GuiNode::new(
+                style.widget_layout(),
+                NodeDraw::Text(
+                    OwnedSection::default().with_layout(Self::make_layout(h_align, v_align, wrap)),
+                ),
             ),
         );
-        Text {
+        let widget = Text {
             style: text_style,
             node,
-        }
+        };
+        widget.set_text_string(gui, text);
+        widget
     }
 }
 
@@ -155,17 +115,5 @@ impl WidgetNode for Text {
     }
     fn node(&self) -> GuiNodeId {
         self.node
-    }
-    fn unpack_extra_fields(&self, gui: &mut Gui, fields: &HashMap<String, StyleValue>) {
-        if let Some(text) = fields.get("text").and_then(|value| value.as_str()) {
-            self.set_text_string(gui, text);
-        }
-        if let Some(align) = fields
-            .get("align")
-            .and_then(|value| value.as_str())
-            .and_then(|value| value.parse().ok())
-        {
-            self.set_align(gui, align);
-        }
     }
 }

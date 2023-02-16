@@ -117,7 +117,7 @@ impl TextureRectPipeline {
 
         let white_pixel: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
         let none_image = RgbaImage::from_pixel(1, 1, Rgba(white_pixel)).into();
-        let none_texture = Texture::load(context, &none_image).unwrap();
+        let none_texture = Texture::load_image(context, &none_image).unwrap();
 
         let vs = vs::load(context.device()).unwrap();
         let fs = fs::load(context.device()).unwrap();

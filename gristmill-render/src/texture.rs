@@ -1,46 +1,57 @@
 use crate::RenderContext;
 use gristmill_core::{
-    asset::{image::DynamicImage, AssetExt, AssetStorage},
-    geom2d::Size,
+    asset::{self, image::DynamicImage, AssetError, AssetResult},
+    math::IVec2,
 };
 use std::{hash::Hash, sync::Arc};
 use vulkano::{
     format::Format,
     image::view::{ImageView, ImageViewCreateInfo},
-    image::{
-        immutable::ImmutableImageCreationError, ImageAccess, ImageDimensions, ImageViewAbstract,
-        ImmutableImage, MipmapsCount,
-    },
+    image::{ImageAccess, ImageDimensions, ImageViewAbstract, ImmutableImage, MipmapsCount},
     sampler::{ComponentMapping, ComponentSwizzle},
 };
-
-pub trait ImageDimensionsExt {
-    fn from_size(size: Size) -> Self;
-}
-impl ImageDimensionsExt for ImageDimensions {
-    fn from_size(size: Size) -> Self {
-        ImageDimensions::Dim2d {
-            width: size.width,
-            height: size.height,
-            array_layers: 1,
-        }
-    }
-}
 
 #[allow(clippy::derive_hash_xor_eq)]
 #[derive(Clone, Hash)]
 pub struct Texture(Arc<dyn ImageViewAbstract>);
 
 impl Texture {
+    pub fn load_image(context: &mut RenderContext, image: &DynamicImage) -> AssetResult<Self> {
+        let allocator = context.allocator().clone();
+        let (format, component_mapping) = Self::format_info(image);
+        let vk_image = ImmutableImage::from_iter(
+            &allocator,
+            image.as_bytes().iter().cloned(),
+            ImageDimensions::Dim2d {
+                width: image.width(),
+                height: image.height(),
+                array_layers: 1,
+            },
+            MipmapsCount::One,
+            format,
+            context.builder(),
+        )
+        .map_err(|error| AssetError::Other(error.to_string()))?;
+        let mut image_info = ImageViewCreateInfo::from_image(&vk_image);
+        image_info.component_mapping = component_mapping;
+        let image_view = ImageView::new(vk_image, image_info)
+            .map_err(|error| AssetError::Other(error.to_string()))?;
+        Ok(Texture(image_view))
+    }
+    pub fn load_asset(context: &mut RenderContext, file: &str) -> AssetResult<Self> {
+        let image = asset::load_image_file("assets", file)?;
+        Self::load_image(context, &image)
+    }
+
     pub fn image(&self) -> Arc<dyn ImageAccess> {
         self.0.image()
     }
     pub fn image_view(&self) -> &Arc<dyn ImageViewAbstract> {
         &self.0
     }
-    pub fn dimensions(&self) -> Size {
+    pub fn dimensions(&self) -> IVec2 {
         if let ImageDimensions::Dim2d { width, height, .. } = self.0.dimensions() {
-            Size { width, height }
+            IVec2::new(width as i32, height as i32)
         } else {
             panic!("Texture is not 2D");
         }
@@ -99,26 +110,6 @@ impl Texture {
             _ => panic!("unknown image type"),
         }
     }
-    pub fn load(
-        context: &mut RenderContext,
-        image: &DynamicImage,
-    ) -> Result<Texture, ImmutableImageCreationError> {
-        let allocator = context.allocator().clone();
-        let dimensions = Size::new(image.width(), image.height());
-        let (format, component_mapping) = Self::format_info(image);
-        let vk_image = ImmutableImage::from_iter(
-            &allocator,
-            image.as_bytes().iter().cloned(),
-            ImageDimensions::from_size(dimensions),
-            MipmapsCount::One,
-            format,
-            context.builder(),
-        )?;
-        let mut image_info = ImageViewCreateInfo::from_image(&vk_image);
-        image_info.component_mapping = component_mapping;
-        let image_view = ImageView::new(vk_image, image_info).unwrap();
-        Ok(Texture(image_view))
-    }
 }
 
 impl From<Arc<dyn ImageViewAbstract>> for Texture {
@@ -133,27 +124,3 @@ impl PartialEq for Texture {
     }
 }
 impl Eq for Texture {}
-
-pub trait TextureStorage {
-    fn load(&mut self, context: &mut RenderContext, asset_path: &str) -> Option<&Texture>;
-}
-
-impl TextureStorage for AssetStorage<Texture> {
-    fn load(&mut self, context: &mut RenderContext, asset_path: &str) -> Option<&Texture> {
-        if !self.contains(asset_path) {
-            if let Some(image) = DynamicImage::load(asset_path) {
-                match Texture::load(context, &image) {
-                    Ok(asset) => {
-                        self.insert(asset_path.to_owned(), asset);
-                    }
-                    Err(error) => {
-                        log::error!("Failed to load texture \"{}\": {}.", asset_path, error)
-                    }
-                }
-            } else {
-                log::error!("Failed to load texture \"{}\".", asset_path);
-            }
-        }
-        self.get(asset_path)
-    }
-}

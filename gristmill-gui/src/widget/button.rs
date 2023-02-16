@@ -1,16 +1,13 @@
 use crate::{
     widget::{
-        Image, StyleQuery, StyleValue, StyleValues, Text, TextAlign, Widget, WidgetBehavior,
-        WidgetInput, WidgetNode,
+        Image, StyleValues, Text, Widget, WidgetBehavior, WidgetInput, WidgetNode, WidgetNodeExt,
+        WidgetStyle,
     },
-    Gui, GuiDraw, GuiLayout, GuiNodeId, GuiNodeStorage,
+    Anchor, Gui, GuiNodeId, GuiNodeStorage, NodeDraw,
 };
-use gristmill_core::{
-    geom2d::{IRect, Size},
-    Color,
-};
+use gristmill_core::Color;
 use gristmill_render::Texture;
-use std::{any::Any, cell::Cell, collections::HashMap, rc::Rc};
+use std::{any::Any, cell::Cell, rc::Rc};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ButtonState {
@@ -47,8 +44,8 @@ impl Default for ButtonDraw {
             texture: None,
             disabled: Color::new(0.75, 0.75, 0.75, 0.5),
             normal: Color::new_value(0.75),
-            hovered: Color::new_value(0.85),
-            pressed: Color::new_value(1.0),
+            hovered: Color::new_value(0.8),
+            pressed: Color::new_value(0.9),
         }
     }
 }
@@ -57,18 +54,21 @@ impl ButtonDraw {
     pub fn with_texture(texture: Texture) -> Self {
         ButtonDraw {
             texture: Some(texture),
-            ..Default::default()
+            disabled: Color::new(1.0, 1.0, 1.0, 0.5),
+            normal: Color::new_value(1.0),
+            hovered: Color::new_value(0.9),
+            pressed: Color::new_value(0.75),
         }
     }
 
-    fn draw(&self, state: ButtonState) -> GuiDraw {
+    fn draw(&self, state: ButtonState) -> NodeDraw {
         let color = match state {
             ButtonState::Disabled => self.disabled,
             ButtonState::Normal => self.normal,
             ButtonState::Hovered => self.hovered,
             ButtonState::Pressed => self.pressed,
         };
-        GuiDraw::Rect(self.texture.clone(), color)
+        NodeDraw::Rect(self.texture.clone(), color)
     }
 }
 
@@ -129,45 +129,28 @@ impl Button {
     {
         self.label.set_text_string(gui, text);
     }
-
-    pub(crate) fn default_style() -> StyleValues {
-        let mut style = StyleValues::new();
-        style.insert(
-            "texture".to_owned(),
-            crate::widget::style::make_empty_texture(),
-        );
-        style.insert(
-            "size".to_owned(),
-            StyleValue::try_from(Size::new(128, 32)).unwrap(),
-        );
-        style
-    }
 }
 
 impl Widget for Button {
-    fn type_name() -> &'static str {
-        "Button"
+    fn class_name() -> &'static str {
+        "button"
     }
-    fn new(gui: &mut Gui, parent: GuiNodeId, style: StyleQuery) -> Self {
-        let draw = if let Some(texture) = style.get_texture(gui, "texture") {
+    fn new(gui: &mut Gui, parent: GuiNodeId, mut style: StyleValues) -> Self {
+        let draw = if let Some(texture) = style.widget_value("texture", None) {
             ButtonDraw::with_texture(texture)
         } else {
             ButtonDraw::default()
         };
+        let label_text = style.widget_value("label", String::new());
 
-        let image = Image::new(gui, parent, StyleQuery::default());
-        image.set_layout(
-            gui,
-            GuiLayout::Child(IRect::from_size(
-                style.get("size").unwrap_or(Size::new(128, 32)),
-            )),
-        );
+        let image = Image::new(gui, parent, StyleValues::new());
         let image_node = image.node_data(gui).unwrap();
         image_node.flags.pointer_opaque = true;
+        image_node.layout = style.widget_layout();
         image_node.draw = draw.draw(ButtonState::Disabled);
-        let label = Text::new(gui, image.node(), style);
-        label.set_layout(gui, GuiLayout::fill());
-        label.set_align(gui, TextAlign::Middle);
+        let label = Text::new(gui, image.node(), StyleValues::new());
+        label.set_text_align(gui, (Anchor::Middle, Anchor::Middle), false);
+        label.set_text_string(gui, label_text);
 
         let behavior = gui.register_behavior(ButtonBehavior {
             node: image.node(),
@@ -190,10 +173,5 @@ impl WidgetNode for Button {
     }
     fn node(&self) -> GuiNodeId {
         self.node
-    }
-    fn unpack_extra_fields(&self, gui: &mut Gui, fields: &HashMap<String, StyleValue>) {
-        if let Some(label) = fields.get("label").and_then(|value| value.as_str()) {
-            self.set_label_string(gui, label);
-        }
     }
 }

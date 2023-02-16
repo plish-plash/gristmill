@@ -1,12 +1,12 @@
-use crate::{GuiDraw, GuiNodeStorage};
+use crate::{GuiNodeStorage, NodeDraw};
 use glyph_brush::*;
 use gristmill_core::{
-    geom2d::{IRect, Rect, Size},
+    geom2d::{IRect, Rect},
     math::IVec2,
 };
 use gristmill_render::{
     texture_rect::{TextureRect, TextureRectRenderer},
-    ImageDimensionsExt, RenderContext, Texture,
+    RenderContext, Texture,
 };
 use std::sync::Arc;
 use vulkano::{
@@ -30,14 +30,14 @@ fn text_screen_position(rect: IRect, layout: Layout<BuiltInLineBreaker>) -> IVec
         } => (h_align, v_align),
     };
     let x = match h_align {
-        HorizontalAlign::Left => rect.top_left().x,
+        HorizontalAlign::Left => rect.x(),
         HorizontalAlign::Center => rect.center().x,
-        HorizontalAlign::Right => rect.bottom_right().x,
+        HorizontalAlign::Right => rect.x() + rect.width(),
     };
     let y = match v_align {
-        VerticalAlign::Top => rect.top_left().y,
+        VerticalAlign::Top => rect.y(),
         VerticalAlign::Center => rect.center().y,
-        VerticalAlign::Bottom => rect.bottom_right().y,
+        VerticalAlign::Bottom => rect.y() + rect.height(),
     };
     IVec2::new(x, y)
 }
@@ -56,8 +56,7 @@ impl GuiRenderer {
         let glyph_brush = GlyphBrushBuilder::using_font(font)
             .multithread(false)
             .build();
-        let glyph_texture =
-            Self::create_glyph_texture(context, glyph_brush.texture_dimensions().into());
+        let glyph_texture = Self::create_glyph_texture(context, glyph_brush.texture_dimensions());
 
         GuiRenderer {
             rect_renderer: TextureRectRenderer::new(context),
@@ -83,10 +82,14 @@ impl GuiRenderer {
             z: glyph.extra.z as u16,
         }
     }
-    fn create_glyph_texture(context: &mut RenderContext, dimensions: Size) -> Texture {
+    fn create_glyph_texture(context: &mut RenderContext, dimensions: (u32, u32)) -> Texture {
         let image = StorageImage::with_usage(
             context.allocator(),
-            ImageDimensions::from_size(dimensions),
+            ImageDimensions::Dim2d {
+                width: dimensions.0,
+                height: dimensions.1,
+                array_layers: 1,
+            },
             Format::R8_SRGB,
             ImageUsage {
                 transfer_dst: true,
@@ -137,8 +140,8 @@ impl GuiRenderer {
                 continue;
             }
             match &node.draw {
-                GuiDraw::None => (),
-                GuiDraw::Rect(texture, color) => {
+                NodeDraw::None => (),
+                NodeDraw::Rect(texture, color) => {
                     let (rect, z) = node.draw_rect();
                     self.rect_renderer.queue(TextureRect {
                         texture: texture.clone(),
@@ -148,7 +151,7 @@ impl GuiRenderer {
                         z,
                     });
                 }
-                GuiDraw::Text(owned_section) => {
+                NodeDraw::Text(owned_section) => {
                     let (rect, z) = node.draw_rect();
                     let mut section = owned_section.to_borrowed();
                     section.screen_position =
@@ -175,12 +178,10 @@ impl GuiRenderer {
             match brush_action {
                 Ok(_) => break,
                 Err(BrushError::TextureTooSmall { suggested, .. }) => {
-                    let dimensions = suggested.into();
-                    log::debug!("Resizing glyph texture to {}.", dimensions);
+                    log::debug!("Resizing glyph texture to {suggested:?}.");
                     self.rect_renderer.remove(&self.glyph_texture);
-                    self.glyph_texture = Self::create_glyph_texture(context, dimensions);
-                    self.glyph_brush
-                        .resize_texture(dimensions.width, dimensions.height);
+                    self.glyph_texture = Self::create_glyph_texture(context, suggested);
+                    self.glyph_brush.resize_texture(suggested.0, suggested.1);
                 }
             }
         }

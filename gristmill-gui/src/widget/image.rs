@@ -1,65 +1,36 @@
 use crate::{
-    widget::{StyleQuery, StyleValue, StyleValues, Widget, WidgetNode},
-    Gui, GuiDraw, GuiFlags, GuiNode, GuiNodeExt, GuiNodeId,
+    widget::{StyleValues, Widget, WidgetNode, WidgetNodeExt, WidgetStyle},
+    Gui, GuiNode, GuiNodeExt, GuiNodeId, NodeDraw,
 };
-use gristmill_core::{
-    geom2d::{IRect, Size},
-    Color,
-};
+use gristmill_core::Color;
 use gristmill_render::Texture;
 use std::any::Any;
 
 pub struct Image(GuiNodeId);
 
 impl Image {
-    const DEFAULT_SIZE: Size = Size {
-        width: 64,
-        height: 64,
-    };
-
     pub fn set_texture(&self, gui: &mut Gui, texture: Option<Texture>) {
         if let Some(node) = self.node_data(gui) {
-            node.draw = GuiDraw::Rect(texture, Color::WHITE);
+            node.draw = NodeDraw::Rect(texture, Color::WHITE);
         }
     }
     pub fn set_texture_and_color(&self, gui: &mut Gui, texture: Option<Texture>, color: Color) {
         if let Some(node) = self.node_data(gui) {
-            node.draw = GuiDraw::Rect(texture, color);
+            node.draw = NodeDraw::Rect(texture, color);
         }
-    }
-
-    pub(crate) fn default_style() -> StyleValues {
-        let mut style = StyleValues::new();
-        style.insert(
-            "texture".to_owned(),
-            crate::widget::style::make_empty_texture(),
-        );
-        style.insert(
-            "color".to_owned(),
-            StyleValue::try_from(<[f32; 4]>::from(Color::WHITE)).unwrap(),
-        );
-        style.insert(
-            "size".to_owned(),
-            StyleValue::try_from(Image::DEFAULT_SIZE).unwrap(),
-        );
-        style
     }
 }
 
 impl Widget for Image {
-    fn type_name() -> &'static str {
-        "Image"
+    fn class_name() -> &'static str {
+        "image"
     }
-    fn new(gui: &mut Gui, parent: GuiNodeId, style: StyleQuery) -> Self {
-        let texture = style.get_texture(gui, "texture");
-        let color = style.get("color").unwrap_or(Color::WHITE);
+    fn new(gui: &mut Gui, parent: GuiNodeId, mut style: StyleValues) -> Self {
+        let texture = style.widget_value("texture", None);
+        let color = style.widget_value("color", Color::WHITE);
         let node = parent.add_child(
             gui,
-            GuiNode::new(
-                GuiFlags::default(),
-                GuiDraw::Rect(texture, color),
-                IRect::from_size(style.get("size").unwrap_or(Image::DEFAULT_SIZE)),
-            ),
+            GuiNode::new(style.widget_layout(), NodeDraw::Rect(texture, color)),
         );
         Image(node)
     }

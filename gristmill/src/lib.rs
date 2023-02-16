@@ -1,14 +1,9 @@
-mod console;
-
 pub use gristmill_core::*;
 pub use gristmill_gui as gui;
 pub use gristmill_macros::*;
 pub use gristmill_render as render;
 
-use crate::console::{ConsoleGame, LogRecord};
 use gristmill_render::RenderContext;
-use log::{Log, Metadata, Record};
-use std::sync::mpsc;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -111,6 +106,17 @@ impl<G: Game> GameLoop<G> {
     }
 }
 
+fn init_logging() {
+    let default_log_level = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "info"
+    };
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(default_log_level))
+        .try_init()
+        .ok();
+}
+
 pub fn run_game<G, F>(f: F) -> !
 where
     G: Game,
@@ -126,57 +132,4 @@ where
 
     log::info!("Setup finished, entering main loop.");
     GameLoop { game, context }.start(event_loop)
-}
-
-pub fn run_game_with_console<G, F>(f: F) -> !
-where
-    G: Game,
-    F: FnOnce(&mut RenderContext) -> G,
-{
-    let log_receiver = init_custom_logging();
-    run_game(|context| {
-        let game = f(context);
-        ConsoleGame::new(context, log_receiver, game)
-    })
-}
-
-struct CustomLogger(env_logger::Logger, mpsc::SyncSender<LogRecord>);
-
-impl Log for CustomLogger {
-    fn enabled(&self, _metadata: &Metadata) -> bool {
-        true
-    }
-    fn log(&self, record: &Record) {
-        self.0.log(record);
-        self.1
-            .try_send(LogRecord {
-                level: record.level(),
-                target: record.target().to_owned(),
-                message: format!("{}", record.args()),
-            })
-            .ok();
-    }
-    fn flush(&self) {
-        self.0.flush();
-    }
-}
-
-fn env_logger_builder() -> env_logger::Builder {
-    let default_log_level = if cfg!(debug_assertions) {
-        "debug"
-    } else {
-        "info"
-    };
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(default_log_level))
-}
-fn init_logging() {
-    env_logger_builder().try_init().ok();
-}
-fn init_custom_logging() -> mpsc::Receiver<LogRecord> {
-    let logger = env_logger_builder().build();
-    let log_level = logger.filter();
-    let (sender, receiver) = mpsc::sync_channel(100);
-    log::set_boxed_logger(Box::new(CustomLogger(logger, sender))).ok();
-    log::set_max_level(log_level);
-    receiver
 }

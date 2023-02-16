@@ -1,5 +1,5 @@
 use crate::{
-    asset::{Asset, AssetCategory, AssetResult, AssetWrite, AssetWriteExt, BufReader, BufWriter},
+    asset::{self, AssetError},
     math::Vec2,
 };
 use serde::{Deserialize, Serialize};
@@ -398,6 +398,13 @@ impl Binding for BindingEnum {
 pub struct InputBindings(HashMap<String, BindingEnum>);
 
 impl InputBindings {
+    pub fn load_config() -> Result<InputBindings, AssetError> {
+        asset::load_yaml_file("config", "controls.yaml")
+    }
+    pub fn save_config(&self) -> Result<(), AssetError> {
+        asset::save_yaml_file("config", "controls.yaml", self)
+    }
+
     fn create_actions(&self) -> InputActions {
         InputActions(HashMap::from_iter(self.0.iter().map(|(key, binding)| {
             (key.clone(), ActionState::new(binding.state()))
@@ -432,21 +439,6 @@ impl InputBindings {
     }
 }
 
-impl Asset for InputBindings {
-    fn category() -> AssetCategory {
-        AssetCategory::CONFIG
-    }
-    fn read_from(reader: BufReader) -> AssetResult<Self> {
-        crate::asset::util::read_yaml(reader)
-    }
-}
-
-impl AssetWrite for InputBindings {
-    fn write_to(value: &Self, writer: BufWriter) -> AssetResult<()> {
-        crate::asset::util::write_yaml(writer, value)
-    }
-}
-
 pub struct InputSystem {
     bindings: InputBindings,
     actions: InputActions,
@@ -459,21 +451,30 @@ impl InputSystem {
             bindings,
         }
     }
-    pub fn load_bindings() -> Self {
-        let bindings = InputBindings::load_or_save("controls.yaml", || {
-            type Key = VirtualKeyCode;
-            let mut controls = InputBindings::default();
-            controls.add_mouse_button("primary", MouseButtonBinding::new(MouseButton::Left));
-            controls.add_mouse_button("secondary", MouseButtonBinding::new(MouseButton::Right));
-            controls.add_mouse_motion("look", MouseMotionBinding::new(0.1));
-            controls.add_key("console", KeyBinding::new(Key::Grave));
-            controls.add_key("exit", KeyBinding::new(Key::Escape));
-            controls.add_key_axis2("move", KeyAxis2Binding::new(Key::W, Key::S, Key::A, Key::D));
-            controls.add_key("jump", KeyBinding::new(Key::Space));
-            controls.add_key_axis1("fly", KeyAxis1Binding::new(Key::Space, Key::LShift));
-            controls
-        });
-        Self::new(bindings)
+    pub fn load_config() -> Self {
+        match InputBindings::load_config() {
+            Ok(bindings) => Self::new(bindings),
+            Err(load_error) => {
+                log::warn!("{}", load_error);
+                type Key = VirtualKeyCode;
+                let mut bindings = InputBindings::default();
+                bindings.add_mouse_button("primary", MouseButtonBinding::new(MouseButton::Left));
+                bindings.add_mouse_button("secondary", MouseButtonBinding::new(MouseButton::Right));
+                bindings.add_mouse_motion("look", MouseMotionBinding::new(0.1));
+                bindings.add_key("console", KeyBinding::new(Key::Grave));
+                bindings.add_key("exit", KeyBinding::new(Key::Escape));
+                bindings
+                    .add_key_axis2("move", KeyAxis2Binding::new(Key::W, Key::S, Key::A, Key::D));
+                bindings.add_key("jump", KeyBinding::new(Key::Space));
+                bindings.add_key_axis1("fly", KeyAxis1Binding::new(Key::Space, Key::LShift));
+                if load_error.io_kind() == Some(std::io::ErrorKind::NotFound) {
+                    if let Err(save_error) = bindings.save_config() {
+                        log::warn!("{}", save_error);
+                    }
+                }
+                Self::new(bindings)
+            }
+        }
     }
 
     pub fn actions(&self) -> &InputActions {

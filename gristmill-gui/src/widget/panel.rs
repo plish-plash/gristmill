@@ -1,8 +1,10 @@
 use crate::{
-    widget::{StyleQuery, Widget, WidgetBehavior, WidgetInput, WidgetNode},
-    Gui, GuiDraw, GuiFlags, GuiLayout, GuiNode, GuiNodeExt, GuiNodeId, GuiNodeStorage,
+    widget::{StyleValues, Widget, WidgetBehavior, WidgetInput, WidgetNode, WidgetNodeExt},
+    Gui, GuiNode, GuiNodeExt, GuiNodeId, GuiNodeStorage, NodeDraw, NodeFlags,
 };
 use std::{any::Any, rc::Rc};
+
+use super::WidgetStyle;
 
 struct PanelBehavior(GuiNodeId);
 
@@ -21,7 +23,7 @@ impl Panel {
     pub fn show(&self, gui: &mut Gui) {
         self.set_visible(gui, true);
     }
-    pub fn set_background(&self, gui: &mut Gui, draw: GuiDraw) {
+    pub fn set_background(&self, gui: &mut Gui, draw: NodeDraw) {
         if let Some(node) = self.node_data(gui) {
             node.draw = draw;
         }
@@ -29,19 +31,18 @@ impl Panel {
 }
 
 impl Widget for Panel {
-    fn type_name() -> &'static str {
-        "Panel"
+    fn class_name() -> &'static str {
+        "panel"
     }
-    fn new(gui: &mut Gui, parent: GuiNodeId, _style: StyleQuery) -> Self {
-        let flags = GuiFlags {
-            pointer_opaque: true,
-            ..Default::default()
-        };
+    fn new(gui: &mut Gui, parent: GuiNodeId, mut style: StyleValues) -> Self {
         let node = parent.add_child(
             gui,
             GuiNode {
-                flags,
-                layout: GuiLayout::fill(),
+                flags: NodeFlags {
+                    visible: true,
+                    pointer_opaque: true,
+                },
+                layout: style.widget_layout(),
                 ..Default::default()
             },
         );

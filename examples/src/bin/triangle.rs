@@ -127,7 +127,7 @@ struct TriangleGame {
 impl TriangleGame {
     fn new(context: &mut RenderContext) -> Self {
         TriangleGame {
-            input_system: InputSystem::load_bindings(),
+            input_system: InputSystem::load_config(),
             renderer: ExampleRenderer::new(context),
         }
     }

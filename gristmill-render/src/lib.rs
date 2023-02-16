@@ -1,8 +1,8 @@
 mod texture;
 pub mod texture_rect;
 
-use gristmill_core::{geom2d::Rect, math::Vec2, Color};
-use std::sync::Arc;
+use gristmill_core::{asset::AssetResult, geom2d::Rect, math::Vec2, Color};
+use std::{collections::HashMap, sync::Arc};
 use vulkano::{
     command_buffer::{
         allocator::StandardCommandBufferAllocator, AutoCommandBufferBuilder, CommandBufferUsage,
@@ -91,6 +91,8 @@ pub struct RenderContext {
     current_builder: Option<AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>>,
     current_framebuffer_index: usize,
     recently_resized: bool,
+
+    texture_cache: HashMap<String, Texture>,
 }
 
 impl RenderContext {
@@ -260,6 +262,7 @@ impl RenderContext {
             current_builder: Some(uploads),
             current_framebuffer_index: 0,
             recently_resized: false,
+            texture_cache: HashMap::new(),
         }
     }
     pub fn window(&self) -> &Window {
@@ -327,9 +330,9 @@ impl RenderContext {
                 image_extent: dimensions.into(),
                 ..self.swapchain.create_info()
             }) {
-                Ok(r) => r,
+                Ok(recreate) => recreate,
                 Err(SwapchainCreationError::ImageExtentNotSupported { .. }) => return,
-                Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
+                Err(error) => panic!("Failed to recreate swapchain: {error:?}"),
             };
 
             self.swapchain = new_swapchain;
@@ -350,7 +353,7 @@ impl RenderContext {
                     self.recreate_swapchain = true;
                     return;
                 }
-                Err(e) => panic!("Failed to acquire next image: {:?}", e),
+                Err(error) => panic!("Failed to acquire next image: {error:?}"),
             };
         if suboptimal {
             self.recreate_swapchain = true;
@@ -392,8 +395,8 @@ impl RenderContext {
                 self.recreate_swapchain = true;
                 self.previous_frame_end = Some(sync::now(self.device.clone()).boxed());
             }
-            Err(e) => {
-                panic!("Failed to flush future: {:?}", e);
+            Err(error) => {
+                panic!("Failed to flush future: {error:?}");
             }
         }
     }
@@ -417,10 +420,10 @@ impl RenderContext {
         self.recently_resized
     }
     pub fn viewport(&self) -> Rect {
-        Rect::new(
-            Vec2::from(self.viewport.origin),
-            Vec2::from(self.viewport.dimensions),
-        )
+        Rect {
+            position: Vec2::from(self.viewport.origin),
+            size: Vec2::from(self.viewport.dimensions),
+        }
     }
     pub fn builder(&mut self) -> &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer> {
         self.current_builder.as_mut().expect("not rendering")
@@ -431,5 +434,15 @@ impl RenderContext {
     }
     pub fn set_clear_color(&mut self, clear_color: Color) {
         self.clear_color = clear_color;
+    }
+
+    pub fn load_texture(&mut self, file: &str) -> AssetResult<Texture> {
+        if let Some(texture) = self.texture_cache.get(file) {
+            Ok(texture.clone())
+        } else {
+            let texture = Texture::load_asset(self, file)?;
+            self.texture_cache.insert(file.to_owned(), texture.clone());
+            Ok(texture)
+        }
     }
 }

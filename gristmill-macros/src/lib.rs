@@ -1,7 +1,10 @@
 use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::{quote, quote_spanned};
-use syn::{parse_macro_input, Attribute, DeriveInput, Ident, Lit, Meta, MetaNameValue, Data, Fields, spanned::Spanned};
+use syn::{
+    parse_macro_input, spanned::Spanned, Attribute, Data, DeriveInput, Fields, Ident, Lit, Meta,
+    MetaNameValue,
+};
 
 fn find_category_attribute(attrs: Vec<Attribute>) -> syn::parse::Result<Ident> {
     for attr in attrs {
@@ -62,7 +65,10 @@ pub fn derive_packed_widget(input: TokenStream) -> TokenStream {
         if let Fields::Named(ref fields) = data.fields {
             let recurse = fields.named.iter().map(|field| {
                 let field_ident = &field.ident;
-                let field_name = field_ident.as_ref().map(ToString::to_string).unwrap_or_default();
+                let field_name = field_ident
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_default();
                 if field_name == "root" {
                     quote_spanned! { field.span() => #field_ident: widgets.root()? }
                 } else {

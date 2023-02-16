@@ -1,9 +1,14 @@
+pub mod layout;
 mod render;
 pub mod unpack;
 pub mod widget;
 
 pub use glyph_brush::{OwnedSection, OwnedText};
-use std::rc::{Rc, Weak};
+use layout::GuiLayout;
+use std::{
+    collections::HashMap,
+    rc::{Rc, Weak},
+};
 
 use crate::{
     render::GuiRenderer,
@@ -11,88 +16,101 @@ use crate::{
     widget::{Widget, WidgetBehavior, WidgetInput, WidgetStyles},
 };
 use gristmill_core::{
-    asset::{AssetStorage, AssetWriteExt},
-    geom2d::*,
-    input::InputActions,
-    math::IVec2,
-    new_storage_types, Color,
+    asset::AssetResult, geom2d::*, input::InputActions, math::IVec2, new_storage_types,
+    slotmap::SecondaryMap, Color,
 };
 use gristmill_render::{texture_rect::TextureRectRenderer, RenderContext, Renderable, Texture};
-use serde::{Deserialize, Serialize};
 
-pub struct GuiFlags {
+pub struct NodeFlags {
     pub visible: bool,
     pub pointer_opaque: bool,
 }
 
-impl Default for GuiFlags {
+impl Default for NodeFlags {
     fn default() -> Self {
-        GuiFlags {
+        NodeFlags {
             visible: true,
             pointer_opaque: false,
         }
     }
 }
 
-#[derive(Eq, PartialEq, Copy, Clone, Debug, Serialize, Deserialize)]
-pub enum GuiLayout {
-    Child(IRect),
-    Fill(EdgeRect),
-    Center(Size),
-    Row { spacing: i32, x_size: u32 },
-    Column { spacing: i32, y_size: u32 },
+#[derive(Default)]
+pub enum Anchor {
+    #[default]
+    Begin,
+    Middle,
+    End,
 }
 
-impl Default for GuiLayout {
-    fn default() -> Self {
-        GuiLayout::Child(IRect::ZERO)
+impl std::str::FromStr for Anchor {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "begin" | "Begin" | "left" | "Left" | "top" | "Top" => Ok(Anchor::Begin),
+            "middle" | "Middle" | "center" | "Center" => Ok(Anchor::Middle),
+            "end" | "End" | "right" | "Right" | "bottom" | "Bottom" => Ok(Anchor::End),
+            _ => Err(()),
+        }
     }
 }
 
-impl GuiLayout {
-    pub fn fill() -> GuiLayout {
-        GuiLayout::Fill(EdgeRect::ZERO)
+#[derive(Default)]
+pub struct NodeLayout {
+    pub size: IVec2,
+    pub margin: EdgeRect,
+    pub anchors: (Anchor, Anchor),
+    pub child_layout: String,
+    pub child_spacing: i32,
+}
+
+impl NodeLayout {
+    pub fn width(&self) -> i32 {
+        self.size.x + self.margin.left + self.margin.right
     }
-    fn layout(&self, parent_rect: IRect, previous_sibling: Option<IRect>) -> IRect {
-        match self {
-            GuiLayout::Child(rect) => *rect + parent_rect.position,
-            GuiLayout::Fill(insets) => parent_rect.inset(*insets),
-            GuiLayout::Center(size) => {
-                let off = IVec2::new((size.width / 2) as i32, (size.height / 2) as i32);
-                IRect::new(parent_rect.center() - off, *size)
-            }
-            GuiLayout::Row { spacing, x_size } => {
-                let x = previous_sibling
-                    .map(|r| r.top_right().x + *spacing)
-                    .unwrap_or(parent_rect.position.x);
-                IRect::new(
-                    IVec2::new(x, parent_rect.position.y),
-                    Size::new(*x_size, parent_rect.size.height),
-                )
-            }
-            GuiLayout::Column { spacing, y_size } => {
-                let y = previous_sibling
-                    .map(|r| r.bottom_left().y + *spacing)
-                    .unwrap_or(parent_rect.position.y);
-                IRect::new(
-                    IVec2::new(parent_rect.position.x, y),
-                    Size::new(parent_rect.size.width, *y_size),
-                )
-            }
+    pub fn height(&self) -> i32 {
+        self.size.y + self.margin.top + self.margin.bottom
+    }
+    pub fn horizontal(&self, container_x: i32, container_width: i32) -> (i32, i32) {
+        if self.size.x == 0 {
+            (container_x, container_width)
+        } else {
+            let width = self.width();
+            let x = container_x
+                + match self.anchors.0 {
+                    Anchor::Begin => 0,
+                    Anchor::Middle => (container_width / 2) - (width / 2),
+                    Anchor::End => container_width - width,
+                };
+            (x, width)
+        }
+    }
+    pub fn vertical(&self, container_y: i32, container_height: i32) -> (i32, i32) {
+        if self.size.y == 0 {
+            (container_y, container_height)
+        } else {
+            let height = self.height();
+            let y = container_y
+                + match self.anchors.1 {
+                    Anchor::Begin => 0,
+                    Anchor::Middle => (container_height / 2) - (height / 2),
+                    Anchor::End => container_height - height,
+                };
+            (y, height)
         }
     }
 }
 
 #[derive(Clone)]
-pub enum GuiDraw {
+pub enum NodeDraw {
     None,
     Rect(Option<Texture>, Color),
     Text(OwnedSection),
 }
 
-impl Default for GuiDraw {
+impl Default for NodeDraw {
     fn default() -> Self {
-        GuiDraw::None
+        NodeDraw::None
     }
 }
 
@@ -100,48 +118,32 @@ new_storage_types!(pub type GuiNodeStorage = <GuiNodeId, GuiNode>);
 
 #[derive(Default)]
 pub struct GuiNode {
-    pub flags: GuiFlags,
-    pub layout: GuiLayout,
-    pub draw: GuiDraw,
+    pub flags: NodeFlags,
+    pub layout: NodeLayout,
+    pub draw: NodeDraw,
     pub offset: IRect,
+    visible: bool,
     rect: IRect,
     z: u16,
-    visible: bool,
-    children: Vec<GuiNodeId>,
 }
 
 impl GuiNode {
-    pub fn new(flags: GuiFlags, draw: GuiDraw, rect: IRect) -> GuiNode {
-        GuiNode {
-            flags,
-            layout: GuiLayout::Child(rect),
-            draw,
-            offset: IRect::ZERO,
-            rect: IRect::ZERO,
-            z: 0,
-            visible: false,
-            children: Vec::new(),
-        }
-    }
-    pub fn with_layout(layout: GuiLayout) -> GuiNode {
+    pub fn new(layout: NodeLayout, draw: NodeDraw) -> GuiNode {
         GuiNode {
             layout,
+            draw,
             ..Default::default()
         }
     }
-    pub fn with_draw_and_layout(draw: GuiDraw, layout: GuiLayout) -> GuiNode {
+    pub fn with_draw(draw: NodeDraw) -> GuiNode {
         GuiNode {
-            layout,
             draw,
             ..Default::default()
         }
     }
 
     fn draw_rect(&self) -> (IRect, u16) {
-        let mut rect = self.rect;
-        rect.position += self.offset.position;
-        rect.size += self.offset.size;
-        (rect, self.z)
+        (self.rect.add_components(self.offset), self.z)
     }
 }
 
@@ -150,116 +152,141 @@ pub trait GuiNodeExt {
 }
 impl GuiNodeExt for GuiNodeId {
     fn add_child(&self, gui: &mut Gui, child: GuiNode) -> GuiNodeId {
+        let children = gui
+            .node_children
+            .entry(*self)
+            .expect("node has been removed")
+            .or_default();
         let key = gui.nodes.insert(child);
-        if let Some(node) = gui.nodes.get_mut(*self) {
-            node.children.push(key);
-        }
+        children.push(key);
         key
     }
 }
 
 pub struct Gui {
     renderer: GuiRenderer,
-    textures: AssetStorage<Texture>,
-    styles: Rc<WidgetStyles>,
-    viewport: IRect,
+    styles: WidgetStyles,
+    layouts: HashMap<String, Box<dyn GuiLayout>>,
+    default_layout: Box<dyn GuiLayout>,
+
     nodes: GuiNodeStorage,
+    node_children: SecondaryMap<GuiNodeId, Vec<GuiNodeId>>,
     root: GuiNodeId,
     behaviors: Vec<Weak<dyn WidgetBehavior>>,
     unpacker: Unpacker,
 }
 
 impl Gui {
-    pub fn new(context: &mut RenderContext) -> Self {
-        Self::with_styles(
-            context,
-            WidgetStyles::load_or_save("gui_styles.toml", WidgetStyles::with_all_defaults),
-        )
+    fn default_layouts() -> HashMap<String, Box<dyn GuiLayout>> {
+        let mut layouts: HashMap<String, Box<dyn GuiLayout>> = HashMap::new();
+        layouts.insert("hbox".to_owned(), Box::<layout::HBox>::default());
+        layouts.insert("vbox".to_owned(), Box::<layout::VBox>::default());
+        layouts
     }
-    pub fn with_styles(context: &mut RenderContext, styles: WidgetStyles) -> Self {
-        let mut textures = AssetStorage::new();
-        styles.load_textures(context, &mut textures);
+
+    pub fn new(context: &mut RenderContext, styles: WidgetStyles) -> Self {
         let mut nodes = GuiNodeStorage::default();
-        let root = nodes.insert(GuiNode::default());
+        let root = nodes.insert(GuiNode {
+            rect: context.viewport().as_irect(),
+            ..Default::default()
+        });
         Gui {
             renderer: GuiRenderer::new(context),
-            textures,
-            styles: Rc::new(styles),
-            viewport: IRect::ZERO,
+            styles,
+            layouts: Self::default_layouts(),
+            default_layout: Box::<layout::Anchor>::default(),
             nodes,
+            node_children: SecondaryMap::new(),
             root,
             behaviors: Vec::new(),
             unpacker: Unpacker::with_standard_widgets(),
         }
     }
+    pub fn load_styles(context: &mut RenderContext) -> AssetResult<Self> {
+        let styles = WidgetStyles::load_asset(context)?;
+        Ok(Self::new(context, styles))
+    }
 
     pub fn rect_renderer(&mut self) -> &mut TextureRectRenderer {
         self.renderer.rect_renderer()
     }
-    pub fn textures(&mut self) -> &mut AssetStorage<Texture> {
-        &mut self.textures
+    pub fn styles(&self) -> &WidgetStyles {
+        &self.styles
+    }
+
+    fn layout(&mut self, node: GuiNodeId) {
+        let node_data = if let Some(data) = self.nodes.get(node) {
+            data
+        } else {
+            return;
+        };
+        if !node_data.visible {
+            return;
+        }
+        let node_rect = node_data.rect;
+        let mut z = node_data.z;
+        let children = if let Some(children) = self.node_children.get_mut(node) {
+            children
+        } else {
+            return;
+        };
+        let child_layout = self
+            .layouts
+            .get_mut(&node_data.layout.child_layout)
+            .unwrap_or(&mut self.default_layout);
+        child_layout.begin_layout(node_rect, node_data.layout.child_spacing);
+        children.retain_mut(|child| {
+            let child_data = if let Some(data) = self.nodes.get_mut(*child) {
+                data
+            } else {
+                return false;
+            };
+            child_data.visible = child_data.flags.visible;
+            let rect = child_layout.layout_child(&child_data.layout);
+            child_data.rect = rect.inset(child_data.layout.margin);
+            z += 1;
+            child_data.z = z;
+            true
+        });
+        for child in children.clone() {
+            self.layout(child);
+        }
+    }
+    fn find_pointer_over(&self, node: GuiNodeId, pointer: IVec2) -> Option<GuiNodeId> {
+        let node_data = self.nodes.get(node)?;
+        if !node_data.visible {
+            return None;
+        }
+        if let Some(children) = self.node_children.get(node) {
+            for child in children.iter().rev() {
+                if let Some(pointer_over) = self.find_pointer_over(*child, pointer) {
+                    return Some(pointer_over);
+                }
+            }
+        }
+        if node_data.flags.pointer_opaque && node_data.rect.contains(pointer) {
+            Some(node)
+        } else {
+            None
+        }
     }
 
     pub fn update(&mut self, input: &InputActions) {
         // Layout all nodes.
-        fn layout_children(
-            nodes: &mut GuiNodeStorage,
-            node: GuiNodeId,
-            parent_rect: IRect,
-            parent_visible: bool,
-            mut z: u16,
-        ) {
-            let mut previous_rect = None;
-            let children = nodes.get(node).unwrap().children.clone();
-            for child in children {
-                let node_data = nodes.get_mut(child).unwrap();
-                let visible = parent_visible && node_data.flags.visible;
-                let rect = node_data.layout.layout(parent_rect, previous_rect);
-                node_data.visible = visible;
-                node_data.rect = rect;
-                node_data.z = z;
-                z += 1;
-                layout_children(nodes, child, rect, visible, z);
-                previous_rect = Some(rect);
-            }
-        }
-
-        for (_, node) in self.nodes.iter_mut() {
+        for node in self.nodes.values_mut() {
             node.visible = false;
         }
-        let root_z = {
-            let root = self.nodes.get_mut(self.root).unwrap();
-            root.visible = true;
-            root.z
-        };
-        layout_children(&mut self.nodes, self.root, self.viewport, true, root_z + 1);
+        self.nodes
+            .get_mut(self.root)
+            .expect("root node has been removed")
+            .visible = true;
+        self.layout(self.root);
 
         // Find the node the pointer is over.
-        fn check_pointer_over(
-            nodes: &GuiNodeStorage,
-            node: GuiNodeId,
-            pointer: IVec2,
-        ) -> Option<GuiNodeId> {
-            let node_data = nodes.get(node).unwrap();
-            if !node_data.visible {
-                return None;
-            }
-            for child in node_data.children.iter().rev() {
-                if let Some(pointer_over) = check_pointer_over(nodes, *child, pointer) {
-                    return Some(pointer_over);
-                }
-            }
-            if node_data.flags.pointer_opaque && node_data.rect.contains(pointer) {
-                Some(node)
-            } else {
-                None
-            }
-        }
-
         let pointer_state = input.get("primary");
         let pointer_over = pointer_state
             .pointer()
-            .and_then(|p| check_pointer_over(&self.nodes, self.root, p.as_ivec2()));
+            .and_then(|p| self.find_pointer_over(self.root, p.as_ivec2()));
 
         // Update widget behaviors.
         let input = WidgetInput {
@@ -287,8 +314,8 @@ impl Gui {
         self.root
     }
     pub fn set_root_z(&mut self, z: u16) {
-        if let Some(node) = self.nodes.get_mut(self.root) {
-            node.z = z;
+        if let Some(root_node) = self.nodes.get_mut(self.root) {
+            root_node.z = z;
         }
     }
 
@@ -299,23 +326,17 @@ impl Gui {
         behavior
     }
 
-    pub fn create_widget<W>(&mut self, parent: GuiNodeId, class: Option<&str>) -> W
-    where
-        W: Widget + 'static,
-    {
-        let mut classes = vec![W::type_name()];
-        if let Some(class) = class {
-            classes.insert(0, class);
-        }
-        let styles = self.styles.clone();
-        let style = styles.query(classes);
+    pub fn create_widget<W: Widget>(&mut self, parent: GuiNodeId) -> W {
+        let style = self.styles.query(std::iter::once(W::class_name()));
         W::new(self, parent, style)
     }
 }
 
 impl Renderable for Gui {
     fn pre_render(&mut self, context: &mut RenderContext) {
-        self.viewport = context.viewport().as_irect();
+        if let Some(root_node) = self.nodes.get_mut(self.root) {
+            root_node.rect = context.viewport().as_irect();
+        }
         self.renderer.process(context, &self.nodes);
     }
     fn render(&mut self, context: &mut RenderContext) {
