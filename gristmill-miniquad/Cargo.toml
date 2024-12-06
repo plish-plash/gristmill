@@ -1,0 +1,10 @@
+[package]
+name = "gristmill-miniquad"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gristmill = { path = ".." }
+log = "*"
+emath = "0.28"
+miniquad = "0.4"

@@ -1,0 +1,18 @@
+[workspace]
+members = ["gristmill-miniquad"]
+
+[package]
+name = "gristmill"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+log = "*"
+console = "*"
+indicatif = "*"
+serde = { version = "1.0", features = ["derive"] }
+serde_yml = "*"
+
+emath = { version = "0.28", features = ["serde"] }
+png = "0.17"
+glyph_brush = "0.7"
