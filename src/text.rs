@@ -87,6 +87,7 @@ pub struct TextDrawQueue {
     current_id: usize,
     current_id_used: bool,
     screen_transform: RectTransform,
+    vertices: Vec<(usize, Quad)>,
     quads: Vec<Quad>,
     barriers: Vec<usize>,
     current_barrier: usize,
@@ -103,6 +104,7 @@ impl TextDrawQueue {
             current_id: 0,
             current_id_used: false,
             screen_transform: RectTransform::identity(Rect::ZERO),
+            vertices: Vec::new(),
             quads: Vec::new(),
             barriers: Vec::new(),
             current_barrier: 0,
@@ -112,7 +114,7 @@ impl TextDrawQueue {
         self.glyph_brush.texture_dimensions()
     }
 
-    fn to_vertex(vertex: GlyphVertex<Extra>, transform: &RectTransform) -> Vertex {
+    fn to_vertex(vertex: GlyphVertex<Extra>) -> Vertex {
         fn to_pos(point: ab_glyph::Point) -> Pos2 {
             Pos2::new(point.x, point.y)
         }
@@ -150,10 +152,7 @@ impl TextDrawQueue {
                 tex_coords.max.y - tex_coords.height() * pixel_coords.height() / old_height;
         }
 
-        let rect = transform.transform_rect(Rect::from_min_max(
-            to_pos(pixel_coords.min),
-            to_pos(pixel_coords.max),
-        ));
+        let rect = Rect::from_min_max(to_pos(pixel_coords.min), to_pos(pixel_coords.max));
         let texture_rect = Rect::from_min_max(to_pos(tex_coords.min), to_pos(tex_coords.max));
         (
             extra.id,
@@ -166,6 +165,9 @@ impl TextDrawQueue {
     }
 
     pub fn start(&mut self, screen_transform: RectTransform) {
+        if self.screen_transform.to() != screen_transform.to() {
+            self.quads.clear();
+        }
         self.screen_transform = screen_transform;
         self.current_id = 0;
         self.current_id_used = false;
@@ -230,7 +232,7 @@ impl TextDrawQueue {
         loop {
             brush_action = self.glyph_brush.process_queued(
                 |rect, data| glyph_texture.update(rect.min, rect.max, data),
-                |vertex| Self::to_vertex(vertex, &transform),
+                |vertex| Self::to_vertex(vertex),
             );
 
             // If the cache texture is too small to fit all the glyphs, resize and try again
@@ -250,25 +252,36 @@ impl TextDrawQueue {
 
         // If the text has changed from what was last drawn, store new vertices
         match brush_action.unwrap() {
-            BrushAction::Draw(mut vertices) => {
-                vertices.sort_unstable_by_key(|(id, _)| *id);
-                self.barriers.clear();
-                self.barriers.push(0);
-                let mut last_id = None;
-                for (index, (id, _)) in vertices.iter().enumerate() {
-                    if last_id != Some(*id) {
-                        if last_id.is_some() {
-                            self.barriers.push(index);
-                        }
-                        last_id = Some(*id);
-                    }
-                }
-                if last_id.is_some() {
-                    self.barriers.push(vertices.len());
-                }
-                self.quads = vertices.into_iter().map(|(_, quad)| quad).collect();
+            BrushAction::Draw(vertices) => {
+                self.vertices = vertices;
+                self.vertices.sort_unstable_by_key(|(id, _)| *id);
             }
             BrushAction::ReDraw => (),
+        }
+        if self.quads.len() != self.vertices.len() {
+            self.barriers.clear();
+            self.barriers.push(0);
+            let mut last_id = None;
+            for (index, (id, _)) in self.vertices.iter().enumerate() {
+                if last_id != Some(*id) {
+                    if last_id.is_some() {
+                        self.barriers.push(index);
+                    }
+                    last_id = Some(*id);
+                }
+            }
+            if last_id.is_some() {
+                self.barriers.push(self.vertices.len());
+            }
+            self.quads = self
+                .vertices
+                .iter()
+                .map(|(_, quad)| Quad {
+                    rect: transform.transform_rect(quad.rect),
+                    texture_rect: quad.texture_rect,
+                    color: quad.color,
+                })
+                .collect();
         }
     }
     pub fn draw_next(&mut self) -> &[Quad] {

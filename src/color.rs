@@ -4,12 +4,17 @@ use serde::{Deserialize, Serialize};
 
 pub type Palette = HashMap<String, Color>;
 
+fn default_alpha() -> f32 {
+    1.0
+}
+
 #[derive(Clone, Copy, Serialize, Deserialize)]
 #[repr(C)]
 pub struct Color {
     pub r: f32,
     pub g: f32,
     pub b: f32,
+    #[serde(default = "default_alpha")]
     pub a: f32,
 }
 

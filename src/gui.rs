@@ -25,12 +25,11 @@ pub trait Widget: 'static {
     fn handle_input(&mut self, rect: Rect, input: &GuiInputFrame) -> Option<GuiEvent> {
         None
     }
-    fn draw(&self, rect: Rect, renderer: &mut dyn GuiRenderer);
+    fn draw(&self, renderer: &mut dyn GuiRenderer, rect: Rect);
 }
 
 type WidgetRc = Rc<RefCell<dyn Widget>>;
 
-#[derive(Clone)]
 pub struct WidgetRef<T>(Rc<RefCell<T>>);
 
 impl<T> WidgetRef<T> {
@@ -60,6 +59,12 @@ impl<T: Widget> WidgetRef<T> {
         let mut item = self.with_default_size();
         item.size = size;
         item
+    }
+}
+
+impl<T> Clone for WidgetRef<T> {
+    fn clone(&self) -> Self {
+        WidgetRef(self.0.clone())
     }
 }
 
@@ -220,6 +225,9 @@ impl Container {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
     pub fn add(&mut self, item: ContainerItem) {
         let between = if self.items.is_empty() {
             0.0
@@ -266,7 +274,7 @@ impl Container {
             }
         }
         let grow_size = if grow_items > 0 {
-            ((main_size - main_size_reserved) / (grow_items as f32)).floor()
+            (main_size - main_size_reserved) / (grow_items as f32)
         } else {
             0.0
         };
@@ -317,7 +325,7 @@ impl Widget for Container {
     fn children(&self) -> Option<&Container> {
         Some(self)
     }
-    fn draw(&self, _rect: Rect, _renderer: &mut dyn GuiRenderer) {}
+    fn draw(&self, _renderer: &mut dyn GuiRenderer, _rect: Rect) {}
 }
 
 #[derive(Default)]
@@ -398,7 +406,7 @@ impl ContainerLayout {
     }
     pub fn draw(&self, renderer: &mut dyn GuiRenderer) {
         for item in self.1.iter() {
-            item.widget.borrow().draw(item.rect, renderer);
+            item.widget.borrow().draw(renderer, item.rect);
         }
     }
 }
@@ -433,7 +441,7 @@ impl Widget for Label {
     fn handle_input(&mut self, _rect: Rect, _input: &GuiInputFrame) -> Option<GuiEvent> {
         None
     }
-    fn draw(&self, rect: Rect, renderer: &mut dyn GuiRenderer) {
+    fn draw(&self, renderer: &mut dyn GuiRenderer, rect: Rect) {
         renderer.text().queue(&Text {
             position: self.align.pos_in_rect(&rect),
             align: self.align,
@@ -533,7 +541,7 @@ impl Widget for Button {
         }
         None
     }
-    fn draw(&self, rect: Rect, renderer: &mut dyn GuiRenderer) {
+    fn draw(&self, renderer: &mut dyn GuiRenderer, rect: Rect) {
         renderer
             .quads()
             .queue(&ColorRect(self.palette.state_color(self.state), rect));
