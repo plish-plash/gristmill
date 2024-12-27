@@ -1,35 +1,26 @@
-use std::{path::Path, time::Duration};
+use std::path::Path;
 
-use emath::{Align2, Pos2, Rect};
 use gristmill::{
-    asset::Asset,
     color::Color,
-    gui::GuiInputFrame,
-    render2d::{Camera, Texture},
-    sprite::Sprite,
-    text::FontAsset,
+    math::{Pos2, Rect, Vec2},
+    scene2d::{sprite::Sprite, Camera, UvRect},
+    DrawMetrics,
 };
-use gristmill_miniquad::{GameRenderer, InputEvent, KeyCode, WindowConfig};
+use gristmill_miniquad::{
+    Context, DrawParams, Game, InputEvent, KeyCode, Renderer2D, Scene2D, Texture,
+};
+
+type Layer = u32;
 
 struct GameAssets {
     player: Texture,
 }
 
 impl GameAssets {
-    fn new() -> Self {
+    fn load(context: &mut Context) -> Self {
         GameAssets {
-            player: Texture::load(Path::new("examples/assets/player.png")).unwrap(),
+            player: Texture::load(context, Path::new("examples/assets/player.png")).unwrap(),
         }
-    }
-}
-
-impl gristmill_miniquad::GameAssets for GameAssets {
-    type GameState = GameState;
-    fn window_config(&self) -> WindowConfig {
-        WindowConfig::default()
-    }
-    fn fonts(&self) -> Vec<FontAsset> {
-        Vec::new()
     }
 }
 
@@ -41,8 +32,8 @@ struct GameInput {
     right: bool,
 }
 
-impl gristmill_miniquad::GameInput for GameInput {
-    fn event(&mut self, event: InputEvent) {
+impl GameInput {
+    fn process(&mut self, event: InputEvent) {
         if let InputEvent::Key { key, pressed } = event {
             match key {
                 KeyCode::Up | KeyCode::W => self.up = pressed,
@@ -55,58 +46,77 @@ impl gristmill_miniquad::GameInput for GameInput {
     }
 }
 
-struct GameState {
+struct MyGame {
     assets: GameAssets,
+    input: GameInput,
+    context: Context,
+    renderer: Renderer2D,
+    camera: Camera,
+    scene: Scene2D<Layer>,
     player_position: Pos2,
 }
 
-impl gristmill_miniquad::GameState for GameState {
-    type Assets = GameAssets;
-    type Input = GameInput;
-
-    fn new(assets: GameAssets) -> Self {
-        GameState {
+impl Game for MyGame {
+    fn init(mut context: Context, screen_size: Vec2) -> Self {
+        let assets = GameAssets::load(&mut context);
+        let renderer = Renderer2D::new(&mut context, None);
+        MyGame {
             assets,
+            input: GameInput::default(),
+            context,
+            renderer,
+            camera: Camera {
+                screen_size,
+                center: Pos2::ZERO,
+                scale: 1.0,
+            },
+            scene: Scene2D::new(),
             player_position: Pos2::ZERO,
         }
     }
 
-    fn update(&mut self, input: &mut GameInput, frame_time: Duration) {
+    fn input(&mut self, event: InputEvent) {
+        self.input.process(event);
+    }
+
+    fn update(&mut self, dt: f32) {
         const SPEED: f32 = 128.0;
-        let dt = frame_time.as_secs_f32();
-        if input.up {
+        if self.input.up {
             self.player_position.y -= SPEED * dt;
         }
-        if input.down {
+        if self.input.down {
             self.player_position.y += SPEED * dt;
         }
-        if input.left {
+        if self.input.left {
             self.player_position.x -= SPEED * dt;
         }
-        if input.right {
+        if self.input.right {
             self.player_position.x += SPEED * dt;
         }
     }
 
-    fn camera(&self) -> Camera {
-        Camera {
-            origin: Pos2::ZERO,
-            anchor: Align2::CENTER_CENTER,
-            scale: 1.0,
-        }
+    fn resize(&mut self, screen_size: Vec2) {
+        self.camera.screen_size = screen_size;
     }
 
-    fn draw(&mut self, renderer: &mut GameRenderer, _viewport: Rect, _gui_input: GuiInputFrame) {
-        renderer.quads.queue(&Sprite {
-            position: self.player_position,
-            align: Align2::CENTER_CENTER,
-            texture: self.assets.player.clone(),
-            texture_region: None,
+    fn draw(&mut self) -> DrawMetrics {
+        Sprite {
+            layer: 0,
+            params: DrawParams::texture(&self.assets.player),
+            rect: Rect::from_center_size(self.player_position, self.assets.player.size().to_vec2()),
+            uv: UvRect::default(),
             color: Color::WHITE,
-        });
+        }
+        .draw(&mut self.scene);
+
+        self.renderer.begin_render(&mut self.context, Color::BLACK);
+        self.renderer
+            .set_camera(&mut self.context, self.camera.transform());
+        self.scene.draw(&mut self.renderer, &mut self.context);
+        self.renderer.end_render(&mut self.context)
     }
 }
 
 fn main() {
-    gristmill_miniquad::start(GameAssets::new);
+    gristmill_miniquad::start::<MyGame>(Default::default());
 }

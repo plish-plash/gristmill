@@ -1,109 +1,125 @@
-use std::sync::{Arc, Mutex};
-
 pub mod asset;
 pub mod color;
 pub mod console;
 pub mod gui;
 pub mod input;
 pub mod lang;
-pub mod render2d;
-pub mod sprite;
+pub mod particles;
+pub mod scene2d;
 pub mod text;
 
+use std::{
+    collections::{BTreeMap, HashMap},
+    hash::Hash,
+};
+
 pub use emath as math;
+use emath::Vec2;
 
-pub type Handle = Arc<dyn std::any::Any>;
-
-pub struct QueueBuilder<T> {
-    items: Vec<T>,
-    barriers: Vec<usize>,
-    current_barrier: usize,
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+pub struct Size {
+    pub width: u32,
+    pub height: u32,
 }
 
-impl<T> QueueBuilder<T> {
-    pub fn new() -> Self {
-        QueueBuilder {
-            items: Vec::new(),
-            barriers: Vec::new(),
-            current_barrier: 0,
+impl Size {
+    pub fn new(width: u32, height: u32) -> Self {
+        Size { width, height }
+    }
+    pub fn to_vec2(self) -> Vec2 {
+        Vec2 {
+            x: self.width as f32,
+            y: self.height as f32,
         }
-    }
-    pub fn reset(&mut self) {
-        self.items.clear();
-        self.barriers.clear();
-        self.barriers.push(0);
-        self.current_barrier = 0;
-    }
-    pub fn queue(&mut self, item: T) {
-        self.items.push(item);
-    }
-    pub fn barrier(&mut self) {
-        self.barriers.push(self.items.len());
-    }
-    pub fn draw_next(&mut self) -> (usize, &[T]) {
-        let previous_barrier = self.current_barrier;
-        self.current_barrier += 1;
-        let start = self.barriers[previous_barrier];
-        let end = self.barriers[self.current_barrier];
-        (previous_barrier, &self.items[start..end])
     }
 }
 
 pub trait Renderer {
-    type DrawCall;
-    fn draw(&mut self, draw_call: Self::DrawCall);
-}
-
-pub trait Drawable {
-    type Renderer: Renderer;
-    fn draw_next(
+    type Context;
+    type Params;
+    type Instance;
+    fn draw(
         &mut self,
-        renderer: &mut Self::Renderer,
-    ) -> <Self::Renderer as Renderer>::DrawCall;
+        context: &mut Self::Context,
+        params: &Self::Params,
+        instances: &[Self::Instance],
+    );
 }
 
-pub struct RenderQueue {
-    queue: Mutex<Vec<usize>>,
+struct Batch<Instance>(Vec<Instance>);
+
+impl<Instance> Default for Batch<Instance> {
+    fn default() -> Self {
+        Batch(Vec::new())
+    }
 }
 
-impl RenderQueue {
-    pub fn new() -> Arc<Self> {
-        Arc::new(RenderQueue {
-            queue: Mutex::new(Vec::new()),
-        })
-    }
-    pub fn get_dispatcher(self: &Arc<Self>, index: usize) -> Dispatcher {
-        Dispatcher {
-            index,
-            dispatcher: self.clone(),
-        }
-    }
+struct Layer<Params, Instance>(HashMap<Params, Batch<Instance>>);
 
-    fn queue(&self, index: usize) {
-        let mut queue = self.queue.lock().unwrap();
-        queue.push(index);
+impl<Params, Instance> Default for Layer<Params, Instance> {
+    fn default() -> Self {
+        Layer(HashMap::new())
     }
-    pub fn draw<R: Renderer>(
-        &self,
-        renderer: &mut R,
-        mut drawables: Vec<&mut dyn Drawable<Renderer = R>>,
-    ) {
-        let mut queue = self.queue.lock().unwrap();
-        for index in queue.drain(..) {
-            let draw_call = drawables[index].draw_next(renderer);
-            renderer.draw(draw_call);
+}
+
+pub struct Scene<L, P, I>(BTreeMap<L, Layer<P, I>>);
+
+impl<L: Ord, P: Eq + Hash, I> Scene<L, P, I> {
+    pub fn new() -> Self {
+        Scene(BTreeMap::new())
+    }
+    fn get_batch(&mut self, layer: L, params: P) -> &mut Batch<I> {
+        let layer = self.0.entry(layer).or_default();
+        layer.0.entry(params).or_default()
+    }
+    pub fn queue(&mut self, layer: L, params: P, instance: I) {
+        self.get_batch(layer, params).0.push(instance);
+    }
+    pub fn queue_all<Iter>(&mut self, layer: L, params: P, instances: Iter)
+    where
+        Iter: Iterator<Item = I>,
+    {
+        self.get_batch(layer, params).0.extend(instances);
+    }
+    pub fn draw<R>(&mut self, renderer: &mut R, context: &mut R::Context)
+    where
+        R: Renderer<Params = P, Instance = I>,
+    {
+        for layer in self.0.values_mut() {
+            for (params, batch) in layer.0.iter_mut() {
+                if !batch.0.is_empty() {
+                    renderer.draw(context, params, &batch.0);
+                    batch.0.clear();
+                }
+            }
         }
     }
 }
 
 #[derive(Clone)]
-pub struct Dispatcher {
-    index: usize,
-    dispatcher: Arc<RenderQueue>,
-}
+pub struct DrawMetrics(u32);
 
-impl Dispatcher {
-    pub fn dispatch(&self) {
-        self.dispatcher.queue(self.index);
+impl DrawMetrics {
+    pub fn new() -> Self {
+        DrawMetrics(0)
+    }
+    pub fn draw_call(&mut self) {
+        self.0 += 1;
+    }
+    pub fn end_render(&mut self) -> DrawMetrics {
+        let frame = self.clone();
+        self.0 = 0;
+        frame
+    }
+}
+impl std::ops::Add for DrawMetrics {
+    type Output = DrawMetrics;
+    fn add(self, rhs: Self) -> Self::Output {
+        DrawMetrics(self.0 + rhs.0)
+    }
+}
+impl std::fmt::Display for DrawMetrics {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Draw calls: {}", self.0)
     }
 }

@@ -1,34 +1,43 @@
-use std::{any::Any, borrow::Cow, cell::RefCell, rc::Rc};
-
-use emath::{pos2, vec2, Align2, Pos2, Rect, RectTransform, Vec2};
-
-use crate::{
-    color::{Color, Palette},
-    input::{InputEvent, MouseButton},
-    render2d::QuadDrawQueue,
-    sprite::ColorRect,
-    text::{Font, Text, TextDrawQueue},
+use std::{
+    any::Any, borrow::Cow, cell::RefCell, collections::BTreeMap, marker::PhantomData, rc::Rc,
 };
 
-pub trait GuiRenderer {
-    fn quads(&mut self) -> &mut QuadDrawQueue;
-    fn text(&mut self) -> &mut TextDrawQueue;
+use emath::{pos2, vec2, Align2, Pos2, Rect, Vec2};
+
+use crate::{
+    color::Color,
+    input::{InputEvent, Trigger},
+    text::{Font, Text},
+};
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum GuiLayer {
+    Panel,
+    Background,
+    Content,
+    Foreground,
+}
+
+pub trait DrawPrimitive: 'static {
+    fn from_text(text: Text<'static, GuiLayer>) -> Self;
+    fn from_button_background(rect: Rect, state: ButtonState) -> Self;
 }
 
 pub trait Widget: 'static {
+    type DrawPrimitive;
     fn default_size(&self) -> Vec2;
-    fn children(&self) -> Option<&Container> {
+    fn children(&self) -> Option<&Container<Self::DrawPrimitive>> {
         None
     }
     fn reset_input(&mut self) {}
     #[allow(unused)]
-    fn handle_input(&mut self, rect: Rect, input: &GuiInputFrame) -> Option<GuiEvent> {
+    fn handle_input(&mut self, rect: Rect, input: &GuiInput) -> Option<WidgetEvent> {
         None
     }
-    fn draw(&self, renderer: &mut dyn GuiRenderer, rect: Rect);
+    fn draw(&self, rect: Rect) -> Vec<Self::DrawPrimitive>;
 }
 
-type WidgetRc = Rc<RefCell<dyn Widget>>;
+type WidgetHandle<T> = Rc<RefCell<dyn Widget<DrawPrimitive = T>>>;
 
 pub struct WidgetRef<T>(Rc<RefCell<T>>);
 
@@ -40,9 +49,8 @@ impl<T> WidgetRef<T> {
         self.0.borrow_mut()
     }
 }
-
 impl<T: Widget> WidgetRef<T> {
-    pub fn with_default_size(&self) -> ContainerItem {
+    pub fn with_default_size(&self) -> ContainerItem<T::DrawPrimitive> {
         let size = self.borrow().default_size();
         ContainerItem {
             size,
@@ -50,24 +58,22 @@ impl<T: Widget> WidgetRef<T> {
             widget: Some(self.0.clone()),
         }
     }
-    pub fn grow(&self) -> ContainerItem {
+    pub fn grow(&self) -> ContainerItem<T::DrawPrimitive> {
         let mut item = self.with_default_size();
         item.grow = true;
         item
     }
-    pub fn with_size(&self, size: Vec2) -> ContainerItem {
+    pub fn with_size(&self, size: Vec2) -> ContainerItem<T::DrawPrimitive> {
         let mut item = self.with_default_size();
         item.size = size;
         item
     }
 }
-
 impl<T> Clone for WidgetRef<T> {
     fn clone(&self) -> Self {
         WidgetRef(self.0.clone())
     }
 }
-
 impl<T: Widget> From<T> for WidgetRef<T> {
     fn from(value: T) -> Self {
         WidgetRef(Rc::new(RefCell::new(value)))
@@ -154,13 +160,13 @@ impl Padding {
     }
 }
 
-pub struct ContainerItem {
+pub struct ContainerItem<T> {
     size: Vec2,
     grow: bool,
-    widget: Option<WidgetRc>,
+    widget: Option<WidgetHandle<T>>,
 }
 
-impl ContainerItem {
+impl<T> ContainerItem<T> {
     pub fn empty(size: Vec2) -> Self {
         ContainerItem {
             size,
@@ -177,15 +183,15 @@ impl ContainerItem {
     }
 }
 
-pub struct Container {
+pub struct Container<T> {
     direction: Direction,
     cross_axis: CrossAxis,
     padding: Padding,
     size: Vec2,
-    items: Vec<ContainerItem>,
+    items: Vec<ContainerItem<T>>,
 }
 
-impl Container {
+impl<T: 'static> Container<T> {
     pub fn new(direction: Direction, cross_axis: CrossAxis, padding: Padding) -> Self {
         Container {
             direction,
@@ -199,7 +205,7 @@ impl Container {
         direction: Direction,
         cross_axis: CrossAxis,
         padding: Padding,
-        items: Vec<ContainerItem>,
+        items: Vec<ContainerItem<T>>,
     ) -> Self {
         let mut size = Vec2::ZERO;
         let mut between = 0.0;
@@ -228,7 +234,7 @@ impl Container {
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
-    pub fn add(&mut self, item: ContainerItem) {
+    pub fn add(&mut self, item: ContainerItem<T>) {
         let between = if self.items.is_empty() {
             0.0
         } else {
@@ -246,17 +252,26 @@ impl Container {
         }
         self.items.push(item);
     }
-    pub fn add_widget<T: Widget>(&mut self, widget: T) {
+    pub fn add_widget<W>(&mut self, widget: W)
+    where
+        W: Widget<DrawPrimitive = T>,
+    {
         self.add(WidgetRef::from(widget).with_default_size());
     }
-    pub fn add_widget_grow<T: Widget>(&mut self, widget: T) {
+    pub fn add_widget_grow<W>(&mut self, widget: W)
+    where
+        W: Widget<DrawPrimitive = T>,
+    {
         self.add(WidgetRef::from(widget).grow());
     }
-    pub fn add_widget_with_size<T: Widget>(&mut self, widget: T, size: Vec2) {
+    pub fn add_widget_with_size<W>(&mut self, widget: W, size: Vec2)
+    where
+        W: Widget<DrawPrimitive = T>,
+    {
         self.add(WidgetRef::from(widget).with_size(size));
     }
 
-    fn layout(&self, mut rect: Rect, widget_layouts: &mut Vec<WidgetLayout>) {
+    fn layout(&self, mut rect: Rect, widget_layouts: &mut Vec<WidgetLayout<T>>) {
         if self.items.is_empty() {
             return;
         }
@@ -306,7 +321,7 @@ impl Container {
     }
 }
 
-impl Default for Container {
+impl<T> Default for Container<T> {
     fn default() -> Self {
         Container {
             direction: Direction::Horizontal,
@@ -318,189 +333,200 @@ impl Default for Container {
     }
 }
 
-impl Widget for Container {
+impl<T: 'static> Widget for Container<T> {
+    type DrawPrimitive = T;
     fn default_size(&self) -> Vec2 {
         self.size + self.padding.min_size()
     }
-    fn children(&self) -> Option<&Container> {
+    fn children(&self) -> Option<&Container<T>> {
         Some(self)
     }
-    fn draw(&self, _renderer: &mut dyn GuiRenderer, _rect: Rect) {}
+    fn draw(&self, _rect: Rect) -> Vec<Self::DrawPrimitive> {
+        Vec::new()
+    }
 }
 
-#[derive(Default)]
+pub enum GuiMouseButton {
+    Primary,
+    Secondary,
+}
+
+pub enum GuiInputEvent {
+    MouseMotion {
+        position: Pos2,
+    },
+    MouseButton {
+        button: GuiMouseButton,
+        pressed: bool,
+    },
+}
+
+impl GuiInputEvent {
+    pub fn from_input<Key, MouseButton, F>(
+        event: InputEvent<Key, MouseButton>,
+        f: F,
+    ) -> Option<GuiInputEvent>
+    where
+        F: Fn(MouseButton) -> Option<GuiMouseButton>,
+    {
+        match event {
+            InputEvent::MouseMotion { position } => Some(GuiInputEvent::MouseMotion { position }),
+            InputEvent::MouseButton { button, pressed } => {
+                f(button).map(|button| GuiInputEvent::MouseButton { button, pressed })
+            }
+            _ => None,
+        }
+    }
+}
+
 pub struct GuiInput {
     pointer: Pos2,
-    pressed: bool,
-    just_pressed: bool,
-}
-
-pub struct GuiInputFrame {
-    pub pointer: Pos2,
-    pub pressed: bool,
-    pub just_pressed: bool,
+    primary: Trigger,
+    secondary: Trigger,
 }
 
 impl GuiInput {
-    pub fn event<Key>(&mut self, event: InputEvent<Key>) {
-        match event {
-            InputEvent::MouseMotion { position } => self.pointer = position,
-            InputEvent::MouseButton { button, pressed } => {
-                if button == MouseButton::Left {
-                    self.just_pressed = pressed && !self.pressed;
-                    self.pressed = pressed;
-                }
-            }
-            _ => (),
+    pub fn new() -> Self {
+        GuiInput {
+            pointer: Pos2::ZERO,
+            primary: Trigger::new(),
+            secondary: Trigger::new(),
         }
     }
-    pub fn finish(&mut self, screen_transform: &RectTransform) -> GuiInputFrame {
-        let pointer = screen_transform.inverse().transform_pos(self.pointer);
-        let just_pressed = self.just_pressed;
-        self.just_pressed = false;
-        GuiInputFrame {
-            pointer,
-            pressed: self.pressed,
-            just_pressed,
+    pub fn process(&mut self, event: GuiInputEvent) {
+        match event {
+            GuiInputEvent::MouseMotion { position } => self.pointer = position,
+            GuiInputEvent::MouseButton { button, pressed } => match button {
+                GuiMouseButton::Primary => self.primary.set_pressed(pressed),
+                GuiMouseButton::Secondary => self.secondary.set_pressed(pressed),
+            },
         }
+    }
+    fn update(&mut self) {
+        self.primary.update();
+        self.secondary.update();
     }
 }
 
-pub struct GuiEvent {
+pub struct WidgetEvent {
     pub name: Cow<'static, str>,
     pub payload: Option<Rc<dyn Any>>,
 }
 
-pub struct WidgetLayout {
-    widget: WidgetRc,
+pub struct WidgetLayout<T> {
+    widget: WidgetHandle<T>,
     rect: Rect,
 }
 
-pub struct ContainerLayout(Rect, Vec<WidgetLayout>);
+pub struct Gui<L, T> {
+    layouts: BTreeMap<L, Vec<WidgetLayout<T>>>,
+}
 
-impl ContainerLayout {
+impl<L: Ord, T: 'static> Gui<L, T> {
     pub fn new() -> Self {
-        ContainerLayout(Rect::ZERO, Vec::new())
-    }
-    pub fn mark_dirty(&mut self) {
-        self.0 = Rect::ZERO;
-    }
-    pub fn layout(&mut self, container: &Container, rect: Rect) {
-        if self.0 != rect {
-            self.0 = rect;
-            self.1.clear();
-            container.layout(rect, &mut self.1);
+        Gui {
+            layouts: BTreeMap::new(),
         }
     }
-    pub fn handle_input(&mut self, input: &GuiInputFrame) -> Option<GuiEvent> {
-        for item in self.1.iter_mut().rev() {
+    pub fn layout(&mut self, layer: L, container: &Container<T>, rect: Rect) {
+        let mut layout = self
+            .layouts
+            .entry(layer)
+            .and_modify(|vec| vec.clear())
+            .or_default();
+        container.layout(rect, &mut layout);
+    }
+    pub fn handle_input(&mut self, input: &mut GuiInput) -> Option<WidgetEvent> {
+        let mut widget_event = None;
+        for item in self
+            .layouts
+            .iter_mut()
+            .rev()
+            .flat_map(|(_, layout)| layout.iter_mut().rev())
+        {
             let mut widget = item.widget.borrow_mut();
-            widget.reset_input();
-            if item.rect.contains(input.pointer) {
+            if widget_event.is_none() && item.rect.contains(input.pointer) {
                 if let Some(event) = widget.handle_input(item.rect, &input) {
-                    return Some(event);
+                    widget_event = Some(event);
                 }
+            } else {
+                widget.reset_input();
             }
         }
-        None
+        input.update();
+        widget_event
     }
-    pub fn draw(&self, renderer: &mut dyn GuiRenderer) {
-        for item in self.1.iter() {
-            item.widget.borrow().draw(renderer, item.rect);
+    pub fn draw(&self, layer: &L) -> Vec<T> {
+        let mut primitives = Vec::new();
+        if let Some(items) = self.layouts.get(layer) {
+            for item in items.iter() {
+                primitives.append(&mut item.widget.borrow().draw(item.rect));
+            }
         }
+        primitives
     }
 }
 
-pub struct Label {
+pub struct Label<T> {
     pub font: Font,
     pub text: Cow<'static, str>,
     pub align: Align2,
+    pub wrap: bool,
+    _marker: PhantomData<T>,
 }
 
-impl Label {
+impl<T> Label<T> {
     pub fn new<S: Into<Cow<'static, str>>>(text: S) -> Self {
-        Label {
-            font: Default::default(),
-            text: text.into(),
-            align: Align2::LEFT_CENTER,
-        }
+        Self::with_font(Font::default(), text)
     }
     pub fn with_font<S: Into<Cow<'static, str>>>(font: Font, text: S) -> Self {
         Label {
             font,
             text: text.into(),
             align: Align2::LEFT_CENTER,
+            wrap: false,
+            _marker: PhantomData,
         }
     }
 }
 
-impl Widget for Label {
+impl<T: DrawPrimitive> Widget for Label<T> {
+    type DrawPrimitive = T;
     fn default_size(&self) -> Vec2 {
         vec2(128.0, 32.0)
     }
-    fn handle_input(&mut self, _rect: Rect, _input: &GuiInputFrame) -> Option<GuiEvent> {
-        None
-    }
-    fn draw(&self, renderer: &mut dyn GuiRenderer, rect: Rect) {
-        renderer.text().queue(&Text {
+    fn draw(&self, rect: Rect) -> Vec<Self::DrawPrimitive> {
+        vec![T::from_text(Text {
+            layer: GuiLayer::Content,
             position: self.align.pos_in_rect(&rect),
             align: self.align,
-            wrap: None,
+            wrap: if self.wrap { Some(rect.width()) } else { None },
             font: self.font,
             color: Color::WHITE,
-            text: self.text.as_ref().into(),
-        });
+            text: self.text.clone(),
+        })]
     }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum ButtonState {
+pub enum ButtonState {
     Normal,
     Hover,
     Press,
     Disable,
 }
 
-#[derive(Clone)]
-pub struct ButtonPalette {
-    pub normal: Color,
-    pub hover: Color,
-    pub press: Color,
-    pub disable: Color,
-}
-
-impl ButtonPalette {
-    pub fn new(palette: &Palette) -> Self {
-        ButtonPalette {
-            normal: Color::from_palette(palette, "button_normal"),
-            hover: Color::from_palette(palette, "button_hover"),
-            press: Color::from_palette(palette, "button_press"),
-            disable: Color::from_palette(palette, "button_disable"),
-        }
-    }
-    fn state_color(&self, state: ButtonState) -> Color {
-        match state {
-            ButtonState::Normal => self.normal,
-            ButtonState::Hover => self.hover,
-            ButtonState::Press => self.press,
-            ButtonState::Disable => self.disable,
-        }
-    }
-}
-
-pub struct Button {
+pub struct Button<T> {
     name: Cow<'static, str>,
-    palette: ButtonPalette,
-    label: Label,
+    label: Label<T>,
     state: ButtonState,
     event_payload: Option<Rc<dyn Any>>,
 }
 
-impl Button {
-    pub fn new<S: Into<Cow<'static, str>>>(name: S, palette: ButtonPalette, label: Label) -> Self {
+impl<T> Button<T> {
+    pub fn new<S: Into<Cow<'static, str>>>(name: S, label: Label<T>) -> Self {
         Button {
             name: name.into(),
-            palette,
             label,
             state: ButtonState::Normal,
             event_payload: None,
@@ -513,12 +539,13 @@ impl Button {
             self.state = ButtonState::Disable;
         }
     }
-    pub fn set_event_payload<T: 'static>(&mut self, payload: T) {
+    pub fn set_event_payload<P: 'static>(&mut self, payload: P) {
         self.event_payload = Some(Rc::new(payload));
     }
 }
 
-impl Widget for Button {
+impl<T: DrawPrimitive> Widget for Button<T> {
+    type DrawPrimitive = T;
     fn default_size(&self) -> Vec2 {
         Vec2::new(128.0, 32.0)
     }
@@ -527,31 +554,34 @@ impl Widget for Button {
             self.state = ButtonState::Normal;
         }
     }
-    fn handle_input(&mut self, _rect: Rect, input: &GuiInputFrame) -> Option<GuiEvent> {
+    fn handle_input(&mut self, _rect: Rect, input: &GuiInput) -> Option<WidgetEvent> {
         if self.state != ButtonState::Disable {
-            if input.just_pressed {
-                self.state = ButtonState::Press;
-                return Some(GuiEvent {
+            self.state = if input.primary.pressed() {
+                ButtonState::Press
+            } else {
+                ButtonState::Hover
+            };
+            if input.primary.just_pressed() {
+                return Some(WidgetEvent {
                     name: self.name.clone(),
                     payload: self.event_payload.clone(),
                 });
-            } else {
-                self.state = ButtonState::Hover;
             }
         }
         None
     }
-    fn draw(&self, renderer: &mut dyn GuiRenderer, rect: Rect) {
-        renderer
-            .quads()
-            .queue(&ColorRect(self.palette.state_color(self.state), rect));
-        renderer.text().queue(&Text {
-            position: rect.center(),
-            align: Align2::CENTER_CENTER,
-            wrap: None,
-            font: self.label.font,
-            color: Color::BLACK,
-            text: self.label.text.as_ref().into(),
-        });
+    fn draw(&self, rect: Rect) -> Vec<Self::DrawPrimitive> {
+        vec![
+            T::from_button_background(rect, self.state),
+            T::from_text(Text {
+                layer: GuiLayer::Content,
+                position: rect.center(),
+                align: Align2::CENTER_CENTER,
+                wrap: None,
+                font: self.label.font,
+                color: Color::BLACK,
+                text: self.label.text.clone(),
+            }),
+        ]
     }
 }

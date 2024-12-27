@@ -5,6 +5,8 @@ use std::{
 
 use serde::Deserialize;
 
+use crate::Size;
+
 pub type BufReader = std::io::BufReader<File>;
 pub type BufWriter = std::io::BufWriter<File>;
 
@@ -122,7 +124,7 @@ impl<T: YamlAsset> Asset for T {
 }
 
 pub struct Image {
-    pub size: (u32, u32),
+    pub size: Size,
     pub data: Vec<u8>,
 }
 
@@ -149,10 +151,16 @@ impl Asset for Image {
                     .flat_map(|x| [x[0], x[0], x[0], x[1]])
                     .collect();
             }
-            _ => panic!("unsupported color type {:?}", info.color_type),
+            _ => {
+                return Err(AssetError::new_format(
+                    path.to_owned(),
+                    false,
+                    format!("unsupported color type {:?}", info.color_type),
+                ))
+            }
         }
         Ok(Image {
-            size: (info.width, info.height),
+            size: Size::new(info.width, info.height),
             data,
         })
     }

@@ -1,14 +1,7 @@
 use emath::{Pos2, Vec2};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MouseButton {
-    Left,
-    Middle,
-    Right,
-}
-
 #[derive(Clone)]
-pub enum InputEvent<Key> {
+pub enum InputEvent<Key, MouseButton> {
     Key { key: Key, pressed: bool },
     MouseMotion { position: Pos2 },
     RawMouseMotion { delta: Vec2 },

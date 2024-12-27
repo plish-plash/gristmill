@@ -1,20 +1,26 @@
-use std::{borrow::Cow, io::Read, path::Path};
+use std::{
+    borrow::Cow,
+    collections::HashMap,
+    hash::{Hash, Hasher},
+    io::Read,
+    path::Path,
+};
 
-use emath::{Align, Align2, Pos2, Rect, RectTransform};
+use emath::{Align, Align2, Pos2, Rect};
 use glyph_brush::*;
 
 use crate::{
-    asset::*,
+    asset::{self, Asset, AssetError},
     color::Color,
-    render2d::{Quad, UNIT_RECT},
-    Dispatcher,
+    scene2d::Instance,
+    Scene, Size,
 };
 
 pub use glyph_brush::ab_glyph::FontArc as FontAsset;
 
 impl Asset for FontAsset {
-    fn load(path: &Path) -> Result<Self> {
-        let mut reader = load_file(path)?;
+    fn load(path: &Path) -> asset::Result<Self> {
+        let mut reader = asset::load_file(path)?;
         let mut data = Vec::new();
         reader
             .read_to_end(&mut data)
@@ -23,7 +29,7 @@ impl Asset for FontAsset {
     }
 }
 
-#[derive(Default, PartialEq, Eq, Clone, Copy)]
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
 pub struct FontId(usize);
 
 #[derive(Clone, Copy)]
@@ -48,7 +54,8 @@ impl Font {
 }
 
 #[derive(Clone)]
-pub struct Text<'a> {
+pub struct Text<'a, L> {
+    pub layer: L,
     pub position: Pos2,
     pub align: Align2,
     pub wrap: Option<f32>,
@@ -57,64 +64,50 @@ pub struct Text<'a> {
     pub text: Cow<'a, str>,
 }
 
-#[derive(Clone)]
-struct Extra {
-    id: usize,
+#[derive(Clone, PartialEq)]
+struct Extra<L> {
+    layer: L,
     color: Color,
 }
 
-impl PartialEq for Extra {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
+impl<L: Hash> Hash for Extra<L> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.layer.hash(state);
     }
 }
-impl std::hash::Hash for Extra {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
-}
-
-type Vertex = (usize, Quad);
 
 pub trait GlyphTexture {
-    fn resize(&mut self, width: u32, height: u32);
-    fn update(&mut self, min: [u32; 2], max: [u32; 2], data: &[u8]);
+    type Context;
+    type DrawParams: Clone + Eq + Hash;
+    fn resize(&mut self, context: &mut Self::Context, size: Size);
+    fn update(&mut self, context: &mut Self::Context, min: [u32; 2], max: [u32; 2], data: &[u8]);
+    fn draw_params(&self) -> Self::DrawParams;
 }
 
-pub struct TextDrawQueue {
-    dispatcher: Dispatcher,
-    glyph_brush: GlyphBrush<Vertex, Extra>,
-    current_id: usize,
-    current_id_used: bool,
-    screen_transform: RectTransform,
-    vertices: Vec<(usize, Quad)>,
-    quads: Vec<Quad>,
-    barriers: Vec<usize>,
-    current_barrier: usize,
+pub struct TextBrush<L> {
+    glyph_brush: GlyphBrush<(L, Instance), Extra<L>>,
+    vertices: HashMap<L, Vec<Instance>>,
 }
 
-impl TextDrawQueue {
-    pub fn new(dispatcher: Dispatcher, fonts: Vec<FontAsset>) -> Self {
+impl<L> TextBrush<L>
+where
+    L: Clone + Ord + PartialEq + Hash + 'static,
+{
+    pub fn new(fonts: Vec<FontAsset>) -> Self {
         let glyph_brush = GlyphBrushBuilder::using_fonts(fonts)
             .multithread(false)
             .build();
-        TextDrawQueue {
-            dispatcher,
+        TextBrush {
             glyph_brush,
-            current_id: 0,
-            current_id_used: false,
-            screen_transform: RectTransform::identity(Rect::ZERO),
-            vertices: Vec::new(),
-            quads: Vec::new(),
-            barriers: Vec::new(),
-            current_barrier: 0,
+            vertices: HashMap::new(),
         }
     }
-    pub fn glyph_texture_size(&self) -> (u32, u32) {
-        self.glyph_brush.texture_dimensions()
+    pub fn glyph_texture_size(&self) -> Size {
+        let (width, height) = self.glyph_brush.texture_dimensions();
+        Size { width, height }
     }
 
-    fn to_vertex(vertex: GlyphVertex<Extra>) -> Vertex {
+    fn to_vertex(vertex: GlyphVertex<Extra<L>>) -> (L, Instance) {
         fn to_pos(point: ab_glyph::Point) -> Pos2 {
             Pos2::new(point.x, point.y)
         }
@@ -153,29 +146,20 @@ impl TextDrawQueue {
         }
 
         let rect = Rect::from_min_max(to_pos(pixel_coords.min), to_pos(pixel_coords.max));
-        let texture_rect = Rect::from_min_max(to_pos(tex_coords.min), to_pos(tex_coords.max));
+        let uv = Rect::from_min_max(to_pos(tex_coords.min), to_pos(tex_coords.max)).into();
         (
-            extra.id,
-            Quad {
+            vertex.extra.layer.clone(),
+            Instance {
                 rect,
-                texture_rect,
+                uv,
                 color: extra.color,
             },
         )
     }
 
-    pub fn start(&mut self, screen_transform: RectTransform) {
-        if self.screen_transform.to() != screen_transform.to() {
-            self.quads.clear();
-        }
-        self.screen_transform = screen_transform;
-        self.current_id = 0;
-        self.current_id_used = false;
-        self.current_barrier = 0;
-    }
-
-    pub fn queue(&mut self, text: &Text) {
-        let position = self.screen_transform.transform_pos(text.position);
+    pub fn queue(&mut self, text: &Text<L>) {
+        let position = text.position;
+        let bounds_width = text.wrap.unwrap_or(f32::INFINITY);
         let h_align = match text.align.x() {
             Align::Min => HorizontalAlign::Left,
             Align::Center => HorizontalAlign::Center,
@@ -186,7 +170,6 @@ impl TextDrawQueue {
             Align::Center => VerticalAlign::Center,
             Align::Max => VerticalAlign::Bottom,
         };
-        let bounds_width = text.wrap.unwrap_or(f32::INFINITY);
         let layout = if text.wrap.is_some() {
             Layout::Wrap {
                 line_breaker: BuiltInLineBreaker::default(),
@@ -205,7 +188,7 @@ impl TextDrawQueue {
             scale: text.font.scale().into(),
             font_id: glyph_brush::FontId(text.font.0 .0),
             extra: Extra {
-                id: self.current_id,
+                layer: text.layer.clone(),
                 color: text.color,
             },
         };
@@ -216,79 +199,52 @@ impl TextDrawQueue {
                 .with_layout(layout)
                 .add_text(text),
         );
-        self.current_id_used = true;
-    }
-    pub fn dispatch(&mut self) {
-        if self.current_id_used {
-            self.current_id += 1;
-            self.current_id_used = false;
-            self.dispatcher.dispatch();
-        }
     }
 
-    pub fn finish<T: GlyphTexture>(&mut self, glyph_texture: &mut T) {
-        let transform = RectTransform::from_to(*self.screen_transform.to(), UNIT_RECT);
+    pub fn draw<T: GlyphTexture>(
+        &mut self,
+        context: &mut T::Context,
+        glyph_texture: &mut T,
+        scene: &mut Scene<L, T::DrawParams, Instance>,
+    ) {
         let mut brush_action;
         loop {
+            // Process the queued glyphs.
             brush_action = self.glyph_brush.process_queued(
-                |rect, data| glyph_texture.update(rect.min, rect.max, data),
-                |vertex| Self::to_vertex(vertex),
+                |rect, data| glyph_texture.update(context, rect.min, rect.max, data),
+                move |vertex| Self::to_vertex(vertex),
             );
 
-            // If the cache texture is too small to fit all the glyphs, resize and try again
+            // If the cache texture is too small to fit all the glyphs, resize and try again.
             match brush_action {
                 Ok(_) => break,
                 Err(BrushError::TextureTooSmall {
                     suggested: (width, height),
                     ..
                 }) => {
-                    // Recreate texture as a larger size to fit more
+                    // Recreate the cache texture with a larger size.
                     log::trace!("Resizing glyph texture to {}x{}", width, height);
-                    glyph_texture.resize(width, height);
+                    glyph_texture.resize(context, Size { width, height });
                     self.glyph_brush.resize_texture(width, height);
                 }
             }
         }
 
-        // If the text has changed from what was last drawn, store new vertices
+        // If the text has changed from what was last drawn, store new vertices.
         match brush_action.unwrap() {
             BrushAction::Draw(vertices) => {
-                self.vertices = vertices;
-                self.vertices.sort_unstable_by_key(|(id, _)| *id);
+                self.vertices.clear();
+                for (layer, instance) in vertices {
+                    self.vertices.entry(layer).or_default().push(instance);
+                }
             }
             BrushAction::ReDraw => (),
         }
-        if self.quads.len() != self.vertices.len() {
-            self.barriers.clear();
-            self.barriers.push(0);
-            let mut last_id = None;
-            for (index, (id, _)) in self.vertices.iter().enumerate() {
-                if last_id != Some(*id) {
-                    if last_id.is_some() {
-                        self.barriers.push(index);
-                    }
-                    last_id = Some(*id);
-                }
-            }
-            if last_id.is_some() {
-                self.barriers.push(self.vertices.len());
-            }
-            self.quads = self
-                .vertices
-                .iter()
-                .map(|(_, quad)| Quad {
-                    rect: transform.transform_rect(quad.rect),
-                    texture_rect: quad.texture_rect,
-                    color: quad.color,
-                })
-                .collect();
+
+        // Draw the stored vertices.
+        let params = glyph_texture.draw_params();
+        for (layer, instances) in self.vertices.iter() {
+            scene.queue_all(layer.clone(), params.clone(), instances.iter().cloned());
         }
-    }
-    pub fn draw_next(&mut self) -> &[Quad] {
-        let previous_barrier = self.current_barrier;
-        self.current_barrier += 1;
-        let start = self.barriers[previous_barrier];
-        let end = self.barriers[self.current_barrier];
-        &self.quads[start..end]
     }
 }
