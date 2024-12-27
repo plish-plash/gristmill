@@ -6,6 +6,7 @@ use gristmill::{
     gui::*,
     math::{Rect, Vec2},
     scene2d::{sprite::ColorRect, ViewportCamera},
+    style::StyleSheet,
     text::{FontAsset, Text, TextBrush},
     DrawMetrics,
 };
@@ -17,6 +18,9 @@ struct GameAssets {
 
 impl GameAssets {
     fn load() -> Self {
+        StyleSheet::default()
+            .load_global(Path::new("examples/assets/style.yaml"))
+            .unwrap();
         GameAssets {
             fonts: Vec::<FontAsset>::load(Path::new("examples/assets/fonts.yaml")).unwrap(),
         }
@@ -76,7 +80,9 @@ impl MyGame {
     fn gui_event(&mut self, event: WidgetEvent) {
         if event.name == "button" {
             self.times_clicked += 1;
-            self.label.borrow_mut().text = format!("Times clicked: {}", self.times_clicked).into();
+            self.label
+                .borrow_mut()
+                .set_text(format!("Times clicked: {}", self.times_clicked));
         }
     }
 }
@@ -88,14 +94,9 @@ impl Game for MyGame {
         let renderer = Renderer2D::new(&mut context, Some(text_brush.glyph_texture_size()));
         let camera = ViewportCamera { screen_size };
 
-        let button: WidgetRef<_> = Button::new("button", Label::new("Click Me")).into();
-        let label: WidgetRef<_> = Label::new("").into();
-        let container = Container::with_items(
-            Direction::Horizontal,
-            CrossAxis::Start,
-            Padding::all(16.0),
-            vec![button.with_default_size(), label.with_default_size()],
-        );
+        let mut container = Container::new(Direction::Horizontal, CrossAxis::Start, "root");
+        container.add_widget(Button::new("button", "button", "Click Me"));
+        let label = container.add_widget(Label::new("label", ""));
         let mut gui = Gui::new();
         gui.layout((), &container, camera.viewport());
 

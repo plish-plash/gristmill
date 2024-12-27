@@ -1,0 +1,12 @@
+root:
+  padding: { all: 16 }
+
+button:
+  size: { x: 128, y: 32 }
+  font-id: 0
+  font-scale: 20
+
+label:
+  size: { x: 256, y: 32 }
+  font-id: 0
+  font-scale: 24

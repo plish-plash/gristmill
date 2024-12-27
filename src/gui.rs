@@ -3,10 +3,12 @@ use std::{
 };
 
 use emath::{pos2, vec2, Align2, Pos2, Rect, Vec2};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     color::Color,
     input::{InputEvent, Trigger},
+    style::{style, style_or},
     text::{Font, Text},
 };
 
@@ -25,7 +27,7 @@ pub trait DrawPrimitive: 'static {
 
 pub trait Widget: 'static {
     type DrawPrimitive;
-    fn default_size(&self) -> Vec2;
+    fn layout(&self) -> LayoutInfo;
     fn children(&self) -> Option<&Container<Self::DrawPrimitive>> {
         None
     }
@@ -41,7 +43,14 @@ type WidgetHandle<T> = Rc<RefCell<dyn Widget<DrawPrimitive = T>>>;
 
 pub struct WidgetRef<T>(Rc<RefCell<T>>);
 
-impl<T> WidgetRef<T> {
+impl<T: Widget> WidgetRef<T> {
+    fn new(widget: T) -> Self {
+        WidgetRef(Rc::new(RefCell::new(widget)))
+    }
+    fn to_handle(&self) -> WidgetHandle<T::DrawPrimitive> {
+        self.0.clone()
+    }
+
     pub fn borrow(&self) -> std::cell::Ref<T> {
         self.0.borrow()
     }
@@ -49,34 +58,9 @@ impl<T> WidgetRef<T> {
         self.0.borrow_mut()
     }
 }
-impl<T: Widget> WidgetRef<T> {
-    pub fn with_default_size(&self) -> ContainerItem<T::DrawPrimitive> {
-        let size = self.borrow().default_size();
-        ContainerItem {
-            size,
-            grow: false,
-            widget: Some(self.0.clone()),
-        }
-    }
-    pub fn grow(&self) -> ContainerItem<T::DrawPrimitive> {
-        let mut item = self.with_default_size();
-        item.grow = true;
-        item
-    }
-    pub fn with_size(&self, size: Vec2) -> ContainerItem<T::DrawPrimitive> {
-        let mut item = self.with_default_size();
-        item.size = size;
-        item
-    }
-}
 impl<T> Clone for WidgetRef<T> {
     fn clone(&self) -> Self {
         WidgetRef(self.0.clone())
-    }
-}
-impl<T: Widget> From<T> for WidgetRef<T> {
-    fn from(value: T) -> Self {
-        WidgetRef(Rc::new(RefCell::new(value)))
     }
 }
 
@@ -130,7 +114,19 @@ impl CrossAxis {
     }
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PaddingDe {
+    all: Option<f32>,
+    left: Option<f32>,
+    top: Option<f32>,
+    right: Option<f32>,
+    bottom: Option<f32>,
+    between: Option<f32>,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, Copy)]
+#[serde(from = "PaddingDe")]
 pub struct Padding {
     pub left: f32,
     pub top: f32,
@@ -159,31 +155,59 @@ impl Padding {
         vec2(self.left + self.right, self.bottom + self.top)
     }
 }
-
-pub struct ContainerItem<T> {
-    size: Vec2,
-    grow: bool,
-    widget: Option<WidgetHandle<T>>,
-}
-
-impl<T> ContainerItem<T> {
-    pub fn empty(size: Vec2) -> Self {
-        ContainerItem {
-            size,
-            grow: false,
-            widget: None,
+impl From<PaddingDe> for Padding {
+    fn from(value: PaddingDe) -> Self {
+        let all = value.all.unwrap_or(0.0);
+        Padding {
+            left: value.left.unwrap_or(all),
+            top: value.top.unwrap_or(all),
+            right: value.right.unwrap_or(all),
+            bottom: value.bottom.unwrap_or(all),
+            between: value.between.unwrap_or(all),
         }
     }
-    pub fn empty_grow() -> Self {
-        ContainerItem {
+}
+
+#[derive(Default, Clone, Copy)]
+pub struct LayoutInfo {
+    size: Vec2,
+    grow: bool,
+}
+
+impl LayoutInfo {
+    pub fn with_size(size: Vec2) -> Self {
+        LayoutInfo { size, grow: false }
+    }
+    pub fn grow() -> Self {
+        LayoutInfo {
             size: Vec2::ZERO,
             grow: true,
-            widget: None,
+        }
+    }
+    pub fn from_style(class: &str, default_size: Vec2) -> Self {
+        LayoutInfo {
+            size: style_or(class, "size", default_size),
+            grow: style(class, "grow"),
+        }
+    }
+}
+
+enum ContainerItem<T> {
+    Empty(LayoutInfo),
+    Widget(WidgetHandle<T>),
+}
+
+impl<T: 'static> ContainerItem<T> {
+    fn layout(&self) -> LayoutInfo {
+        match self {
+            ContainerItem::Empty(layout) => *layout,
+            ContainerItem::Widget(widget) => widget.borrow().layout(),
         }
     }
 }
 
 pub struct Container<T> {
+    layout: LayoutInfo,
     direction: Direction,
     cross_axis: CrossAxis,
     padding: Padding,
@@ -192,83 +216,49 @@ pub struct Container<T> {
 }
 
 impl<T: 'static> Container<T> {
-    pub fn new(direction: Direction, cross_axis: CrossAxis, padding: Padding) -> Self {
+    pub fn new(direction: Direction, cross_axis: CrossAxis, class: &str) -> Self {
         Container {
+            layout: LayoutInfo::from_style(class, Vec2::ZERO),
             direction,
             cross_axis,
-            padding,
+            padding: style(class, "padding"),
             size: Vec2::ZERO,
             items: Vec::new(),
-        }
-    }
-    pub fn with_items(
-        direction: Direction,
-        cross_axis: CrossAxis,
-        padding: Padding,
-        items: Vec<ContainerItem<T>>,
-    ) -> Self {
-        let mut size = Vec2::ZERO;
-        let mut between = 0.0;
-        for item in items.iter() {
-            match direction {
-                Direction::Horizontal => {
-                    size.x += item.size.x + between;
-                    size.y = size.y.max(item.size.y);
-                }
-                Direction::Vertical => {
-                    size.x = size.x.max(item.size.x);
-                    size.y += item.size.y + between;
-                }
-            }
-            between = padding.between;
-        }
-        Container {
-            direction,
-            cross_axis,
-            padding,
-            size,
-            items,
         }
     }
 
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
-    pub fn add(&mut self, item: ContainerItem<T>) {
+    fn add(&mut self, item: ContainerItem<T>) {
         let between = if self.items.is_empty() {
             0.0
         } else {
             self.padding.between
         };
+        let size = item.layout().size;
         match self.direction {
             Direction::Horizontal => {
-                self.size.x += item.size.x + between;
-                self.size.y = self.size.y.max(item.size.y);
+                self.size.x += size.x + between;
+                self.size.y = self.size.y.max(size.y);
             }
             Direction::Vertical => {
-                self.size.x = self.size.x.max(item.size.x);
-                self.size.y += item.size.y + between;
+                self.size.x = self.size.x.max(size.x);
+                self.size.y += size.y + between;
             }
         }
         self.items.push(item);
     }
-    pub fn add_widget<W>(&mut self, widget: W)
-    where
-        W: Widget<DrawPrimitive = T>,
-    {
-        self.add(WidgetRef::from(widget).with_default_size());
+    pub fn add_empty(&mut self, empty: LayoutInfo) {
+        self.add(ContainerItem::Empty(empty))
     }
-    pub fn add_widget_grow<W>(&mut self, widget: W)
+    pub fn add_widget<W>(&mut self, widget: W) -> WidgetRef<W>
     where
         W: Widget<DrawPrimitive = T>,
     {
-        self.add(WidgetRef::from(widget).grow());
-    }
-    pub fn add_widget_with_size<W>(&mut self, widget: W, size: Vec2)
-    where
-        W: Widget<DrawPrimitive = T>,
-    {
-        self.add(WidgetRef::from(widget).with_size(size));
+        let widget = WidgetRef::new(widget);
+        self.add(ContainerItem::Widget(widget.to_handle()));
+        widget
     }
 
     fn layout(&self, mut rect: Rect, widget_layouts: &mut Vec<WidgetLayout<T>>) {
@@ -281,11 +271,11 @@ impl<T: 'static> Container<T> {
         let cross_size = self.direction.cross(rect.size());
         let mut main_size_reserved = self.padding.between * ((self.items.len() - 1) as f32);
         let mut grow_items = 0;
-        for item in self.items.iter() {
-            if item.grow {
+        for layout in self.items.iter().map(|item| item.layout()) {
+            if layout.grow {
                 grow_items += 1;
             } else {
-                main_size_reserved += self.direction.main(item.size);
+                main_size_reserved += self.direction.main(layout.size);
             }
         }
         let grow_size = if grow_items > 0 {
@@ -295,15 +285,16 @@ impl<T: 'static> Container<T> {
         };
         let mut main_pos = 0.0;
         for item in self.items.iter() {
-            let item_main = if item.grow {
+            let layout = item.layout();
+            let item_main = if layout.grow {
                 grow_size
             } else {
-                self.direction.main(item.size)
+                self.direction.main(layout.size)
             };
             let (cross_pos, item_cross) = self
                 .cross_axis
-                .layout(cross_size, self.direction.cross(item.size));
-            if let Some(widget) = item.widget.as_ref() {
+                .layout(cross_size, self.direction.cross(layout.size));
+            if let ContainerItem::Widget(widget) = item {
                 let mut widget_rect = self
                     .direction
                     .rectangle(main_pos, cross_pos, item_main, item_cross);
@@ -324,9 +315,10 @@ impl<T: 'static> Container<T> {
 impl<T> Default for Container<T> {
     fn default() -> Self {
         Container {
+            layout: LayoutInfo::default(),
             direction: Direction::Horizontal,
             cross_axis: CrossAxis::Stretch,
-            padding: Default::default(),
+            padding: Padding::default(),
             size: Vec2::ZERO,
             items: Vec::new(),
         }
@@ -335,8 +327,12 @@ impl<T> Default for Container<T> {
 
 impl<T: 'static> Widget for Container<T> {
     type DrawPrimitive = T;
-    fn default_size(&self) -> Vec2 {
-        self.size + self.padding.min_size()
+    fn layout(&self) -> LayoutInfo {
+        let layout_size = self.size + self.padding.min_size();
+        LayoutInfo {
+            size: self.layout.size.max(layout_size),
+            grow: self.layout.grow,
+        }
     }
     fn children(&self) -> Option<&Container<T>> {
         Some(self)
@@ -468,32 +464,37 @@ impl<L: Ord, T: 'static> Gui<L, T> {
 }
 
 pub struct Label<T> {
-    pub font: Font,
-    pub text: Cow<'static, str>,
-    pub align: Align2,
-    pub wrap: bool,
+    layout: LayoutInfo,
+    font: Font,
+    text: Cow<'static, str>,
+    align: Align2,
+    wrap: bool,
     _marker: PhantomData<T>,
 }
 
 impl<T> Label<T> {
-    pub fn new<S: Into<Cow<'static, str>>>(text: S) -> Self {
-        Self::with_font(Font::default(), text)
-    }
-    pub fn with_font<S: Into<Cow<'static, str>>>(font: Font, text: S) -> Self {
+    pub fn new<S: Into<Cow<'static, str>>>(class: &str, text: S) -> Self {
         Label {
-            font,
+            layout: LayoutInfo::from_style(class, Vec2::ZERO),
+            font: Font::new(style(class, "font-id"), style(class, "font-scale")),
             text: text.into(),
-            align: Align2::LEFT_CENTER,
-            wrap: false,
+            align: style_or(class, "align", Align2::LEFT_CENTER),
+            wrap: style(class, "wrap"),
             _marker: PhantomData,
         }
+    }
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+    pub fn set_text<S: Into<Cow<'static, str>>>(&mut self, text: S) {
+        self.text = text.into();
     }
 }
 
 impl<T: DrawPrimitive> Widget for Label<T> {
     type DrawPrimitive = T;
-    fn default_size(&self) -> Vec2 {
-        vec2(128.0, 32.0)
+    fn layout(&self) -> LayoutInfo {
+        self.layout
     }
     fn draw(&self, rect: Rect) -> Vec<Self::DrawPrimitive> {
         vec![T::from_text(Text {
@@ -518,16 +519,22 @@ pub enum ButtonState {
 
 pub struct Button<T> {
     name: Cow<'static, str>,
+    layout: LayoutInfo,
     label: Label<T>,
     state: ButtonState,
     event_payload: Option<Rc<dyn Any>>,
 }
 
 impl<T> Button<T> {
-    pub fn new<S: Into<Cow<'static, str>>>(name: S, label: Label<T>) -> Self {
+    pub fn new<S: Into<Cow<'static, str>>, L: Into<Cow<'static, str>>>(
+        name: S,
+        class: &str,
+        label: L,
+    ) -> Self {
         Button {
             name: name.into(),
-            label,
+            layout: LayoutInfo::from_style(class, vec2(128.0, 32.0)),
+            label: Label::new(class, label),
             state: ButtonState::Normal,
             event_payload: None,
         }
@@ -546,8 +553,8 @@ impl<T> Button<T> {
 
 impl<T: DrawPrimitive> Widget for Button<T> {
     type DrawPrimitive = T;
-    fn default_size(&self) -> Vec2 {
-        Vec2::new(128.0, 32.0)
+    fn layout(&self) -> LayoutInfo {
+        self.layout
     }
     fn reset_input(&mut self) {
         if self.state != ButtonState::Disable {

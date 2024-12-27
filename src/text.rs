@@ -29,27 +29,26 @@ impl Asset for FontAsset {
     }
 }
 
-#[derive(Default, Clone, Copy, PartialEq, Eq)]
-pub struct FontId(usize);
-
 #[derive(Clone, Copy)]
-pub struct Font(FontId, f32);
+pub struct Font {
+    font_id: FontId,
+    scale: f32,
+}
 
 impl Default for Font {
     fn default() -> Self {
-        Font(FontId::default(), 24.0)
+        Font {
+            font_id: FontId::default(),
+            scale: 24.0,
+        }
     }
 }
-
 impl Font {
-    pub fn new(id: FontId, scale: f32) -> Self {
-        Font(id, scale)
-    }
-    pub fn id(&self) -> FontId {
-        self.0
-    }
-    pub fn scale(&self) -> f32 {
-        self.1
+    pub fn new(font_id: usize, scale: f32) -> Self {
+        Font {
+            font_id: FontId(font_id),
+            scale,
+        }
     }
 }
 
@@ -185,8 +184,8 @@ where
         };
         let text = glyph_brush::Text {
             text: &text.text,
-            scale: text.font.scale().into(),
-            font_id: glyph_brush::FontId(text.font.0 .0),
+            scale: text.font.scale.into(),
+            font_id: text.font.font_id,
             extra: Extra {
                 layer: text.layer.clone(),
                 color: text.color,

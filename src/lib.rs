@@ -6,6 +6,7 @@ pub mod input;
 pub mod lang;
 pub mod particles;
 pub mod scene2d;
+pub mod style;
 pub mod text;
 
 use std::{

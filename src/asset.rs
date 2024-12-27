@@ -9,6 +9,7 @@ use crate::Size;
 
 pub type BufReader = std::io::BufReader<File>;
 pub type BufWriter = std::io::BufWriter<File>;
+pub use serde_yml::Value as YamlValue;
 
 #[derive(Debug)]
 enum ErrorKind {
