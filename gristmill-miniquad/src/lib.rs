@@ -157,6 +157,9 @@ impl DrawParams {
     pub fn texture(texture: &Texture) -> Self {
         DrawParams(Some(texture.id()))
     }
+    pub fn texture_asset(texture: &TextureAsset) -> Self {
+        DrawParams(Some(texture.id()))
+    }
 }
 
 pub type Scene2D<L> = gristmill::Scene<L, DrawParams, Instance>;

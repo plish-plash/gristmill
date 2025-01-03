@@ -13,7 +13,7 @@ use crate::{
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum GuiLayer {
+pub enum GuiSubLayer {
     Panel,
     Background,
     Content,
@@ -21,8 +21,16 @@ pub enum GuiLayer {
 }
 
 pub trait DrawPrimitive: 'static {
-    fn from_text(text: Text<'static, GuiLayer>) -> Self;
+    fn from_text(text: Text<'static, GuiSubLayer>) -> Self;
     fn from_button_background(rect: Rect, state: ButtonState) -> Self;
+}
+
+pub struct GuiRenderer<T>(Vec<T>);
+
+impl<T> GuiRenderer<T> {
+    pub fn queue(&mut self, primitive: T) {
+        self.0.push(primitive);
+    }
 }
 
 pub trait Widget: 'static {
@@ -36,7 +44,7 @@ pub trait Widget: 'static {
     fn handle_input(&mut self, rect: Rect, input: &GuiInput) -> Option<WidgetEvent> {
         None
     }
-    fn draw(&self, rect: Rect) -> Vec<Self::DrawPrimitive>;
+    fn draw(&self, renderer: &mut GuiRenderer<Self::DrawPrimitive>, rect: Rect);
 }
 
 type WidgetHandle<T> = Rc<RefCell<dyn Widget<DrawPrimitive = T>>>;
@@ -44,7 +52,7 @@ type WidgetHandle<T> = Rc<RefCell<dyn Widget<DrawPrimitive = T>>>;
 pub struct WidgetRef<T>(Rc<RefCell<T>>);
 
 impl<T: Widget> WidgetRef<T> {
-    fn new(widget: T) -> Self {
+    pub fn new(widget: T) -> Self {
         WidgetRef(Rc::new(RefCell::new(widget)))
     }
     fn to_handle(&self) -> WidgetHandle<T::DrawPrimitive> {
@@ -170,8 +178,8 @@ impl From<PaddingDe> for Padding {
 
 #[derive(Default, Clone, Copy)]
 pub struct LayoutInfo {
-    size: Vec2,
-    grow: bool,
+    pub size: Vec2,
+    pub grow: bool,
 }
 
 impl LayoutInfo {
@@ -184,9 +192,9 @@ impl LayoutInfo {
             grow: true,
         }
     }
-    pub fn from_style(class: &str, default_size: Vec2) -> Self {
+    pub fn from_style(class: &str) -> Self {
         LayoutInfo {
-            size: style_or(class, "size", default_size),
+            size: style(class, "size"),
             grow: style(class, "grow"),
         }
     }
@@ -218,7 +226,7 @@ pub struct Container<T> {
 impl<T: 'static> Container<T> {
     pub fn new(direction: Direction, cross_axis: CrossAxis, class: &str) -> Self {
         Container {
-            layout: LayoutInfo::from_style(class, Vec2::ZERO),
+            layout: LayoutInfo::from_style(class),
             direction,
             cross_axis,
             padding: style(class, "padding"),
@@ -259,6 +267,12 @@ impl<T: 'static> Container<T> {
         let widget = WidgetRef::new(widget);
         self.add(ContainerItem::Widget(widget.to_handle()));
         widget
+    }
+    pub fn add_widget_ref<W>(&mut self, widget: WidgetRef<W>)
+    where
+        W: Widget<DrawPrimitive = T>,
+    {
+        self.add(ContainerItem::Widget(widget.to_handle()));
     }
 
     fn layout(&self, mut rect: Rect, widget_layouts: &mut Vec<WidgetLayout<T>>) {
@@ -337,9 +351,7 @@ impl<T: 'static> Widget for Container<T> {
     fn children(&self) -> Option<&Container<T>> {
         Some(self)
     }
-    fn draw(&self, _rect: Rect) -> Vec<Self::DrawPrimitive> {
-        Vec::new()
-    }
+    fn draw(&self, _renderer: &mut GuiRenderer<Self::DrawPrimitive>, _rect: Rect) {}
 }
 
 pub enum GuiMouseButton {
@@ -359,16 +371,22 @@ pub enum GuiInputEvent {
 
 impl GuiInputEvent {
     pub fn from_input<Key, MouseButton, F>(
-        event: InputEvent<Key, MouseButton>,
+        event: &InputEvent<Key, MouseButton>,
         f: F,
     ) -> Option<GuiInputEvent>
     where
+        MouseButton: Copy,
         F: Fn(MouseButton) -> Option<GuiMouseButton>,
     {
         match event {
-            InputEvent::MouseMotion { position } => Some(GuiInputEvent::MouseMotion { position }),
+            InputEvent::MouseMotion { position } => Some(GuiInputEvent::MouseMotion {
+                position: *position,
+            }),
             InputEvent::MouseButton { button, pressed } => {
-                f(button).map(|button| GuiInputEvent::MouseButton { button, pressed })
+                f(*button).map(|button| GuiInputEvent::MouseButton {
+                    button,
+                    pressed: *pressed,
+                })
             }
             _ => None,
         }
@@ -376,9 +394,9 @@ impl GuiInputEvent {
 }
 
 pub struct GuiInput {
-    pointer: Pos2,
-    primary: Trigger,
-    secondary: Trigger,
+    pub pointer: Pos2,
+    pub primary: Trigger,
+    pub secondary: Trigger,
 }
 
 impl GuiInput {
@@ -453,13 +471,13 @@ impl<L: Ord, T: 'static> Gui<L, T> {
         widget_event
     }
     pub fn draw(&self, layer: &L) -> Vec<T> {
-        let mut primitives = Vec::new();
+        let mut renderer = GuiRenderer(Vec::new());
         if let Some(items) = self.layouts.get(layer) {
             for item in items.iter() {
-                primitives.append(&mut item.widget.borrow().draw(item.rect));
+                item.widget.borrow().draw(&mut renderer, item.rect);
             }
         }
-        primitives
+        renderer.0
     }
 }
 
@@ -475,8 +493,8 @@ pub struct Label<T> {
 impl<T> Label<T> {
     pub fn new<S: Into<Cow<'static, str>>>(class: &str, text: S) -> Self {
         Label {
-            layout: LayoutInfo::from_style(class, Vec2::ZERO),
-            font: Font::new(style(class, "font-id"), style(class, "font-scale")),
+            layout: LayoutInfo::from_style(class),
+            font: Font::from_style(class),
             text: text.into(),
             align: style_or(class, "align", Align2::LEFT_CENTER),
             wrap: style(class, "wrap"),
@@ -496,16 +514,16 @@ impl<T: DrawPrimitive> Widget for Label<T> {
     fn layout(&self) -> LayoutInfo {
         self.layout
     }
-    fn draw(&self, rect: Rect) -> Vec<Self::DrawPrimitive> {
-        vec![T::from_text(Text {
-            layer: GuiLayer::Content,
+    fn draw(&self, renderer: &mut GuiRenderer<Self::DrawPrimitive>, rect: Rect) {
+        renderer.queue(T::from_text(Text {
+            layer: GuiSubLayer::Content,
             position: self.align.pos_in_rect(&rect),
             align: self.align,
             wrap: if self.wrap { Some(rect.width()) } else { None },
             font: self.font,
             color: Color::WHITE,
             text: self.text.clone(),
-        })]
+        }));
     }
 }
 
@@ -527,13 +545,13 @@ pub struct Button<T> {
 
 impl<T> Button<T> {
     pub fn new<S: Into<Cow<'static, str>>, L: Into<Cow<'static, str>>>(
-        name: S,
         class: &str,
+        name: S,
         label: L,
     ) -> Self {
         Button {
             name: name.into(),
-            layout: LayoutInfo::from_style(class, vec2(128.0, 32.0)),
+            layout: LayoutInfo::from_style(class),
             label: Label::new(class, label),
             state: ButtonState::Normal,
             event_payload: None,
@@ -577,18 +595,16 @@ impl<T: DrawPrimitive> Widget for Button<T> {
         }
         None
     }
-    fn draw(&self, rect: Rect) -> Vec<Self::DrawPrimitive> {
-        vec![
-            T::from_button_background(rect, self.state),
-            T::from_text(Text {
-                layer: GuiLayer::Content,
-                position: rect.center(),
-                align: Align2::CENTER_CENTER,
-                wrap: None,
-                font: self.label.font,
-                color: Color::BLACK,
-                text: self.label.text.clone(),
-            }),
-        ]
+    fn draw(&self, renderer: &mut GuiRenderer<Self::DrawPrimitive>, rect: Rect) {
+        renderer.queue(T::from_button_background(rect, self.state));
+        renderer.queue(T::from_text(Text {
+            layer: GuiSubLayer::Content,
+            position: rect.center(),
+            align: Align2::CENTER_CENTER,
+            wrap: None,
+            font: self.label.font,
+            color: Color::BLACK,
+            text: self.label.text.clone(),
+        }));
     }
 }

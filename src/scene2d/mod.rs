@@ -2,14 +2,15 @@ pub mod sprite;
 
 use emath::{Pos2, Rect, Vec2};
 
-use crate::color::Color;
+use crate::{color::Color, Size};
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq)]
 pub struct UvRect(Rect);
 
 impl UvRect {
-    pub fn from_region(region: Rect, size: Vec2) -> Self {
+    pub fn from_region(region: Rect, size: Size) -> Self {
+        let size = size.to_vec2();
         UvRect(Rect {
             min: Pos2 {
                 x: region.min.x / size.x,
@@ -20,6 +21,10 @@ impl UvRect {
                 y: region.max.y / size.y,
             },
         })
+    }
+    pub fn from_frame(frame: usize, frame_size: Vec2, size: Size) -> Self {
+        let region = Rect::from_min_size(Pos2::new(frame as f32 * frame_size.x, 0.0), frame_size);
+        Self::from_region(region, size)
     }
 }
 impl Default for UvRect {
@@ -82,15 +87,15 @@ pub struct Camera {
 
 impl Camera {
     pub fn constrain(&mut self, rect: Rect) {
-        let screen_extent = self.screen_size / 2.0;
-        if rect.width() < self.screen_size.x {
+        let screen_extent = (self.screen_size / 2.0) / self.scale;
+        if rect.width() < screen_extent.x * 2.0 {
             self.center.x = rect.center().x;
         } else if self.center.x - screen_extent.x < rect.min.x {
             self.center.x = rect.min.x + screen_extent.x;
         } else if self.center.x + screen_extent.x > rect.max.x {
             self.center.x = rect.max.x - screen_extent.x;
         }
-        if rect.height() < self.screen_size.y {
+        if rect.height() < screen_extent.y * 2.0 {
             self.center.y = rect.center().y;
         } else if self.center.y - screen_extent.y < rect.min.y {
             self.center.y = rect.min.y + screen_extent.y;

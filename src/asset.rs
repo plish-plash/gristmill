@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     fs::File,
     path::{Path, PathBuf},
 };
@@ -114,13 +115,43 @@ pub fn load_file(path: &Path) -> Result<BufReader> {
     Ok(BufReader::new(file))
 }
 
+thread_local! {
+    static CURRENT_ASSET: RefCell<Vec<PathBuf>> = RefCell::new(Vec::new());
+}
+
+pub fn asset_relative_path(path: &Path) -> PathBuf {
+    let current_asset = CURRENT_ASSET.with(|current_asset| current_asset.borrow().last().cloned());
+    if let Some(mut asset_path) = current_asset {
+        asset_path.pop();
+        asset_path.push(path);
+        asset_path
+    } else {
+        log::warn!("asset_relative_path: no current asset");
+        path.to_owned()
+    }
+}
+
 pub trait YamlAsset: serde::de::DeserializeOwned {}
 
 impl<T: YamlAsset> Asset for T {
     fn load(path: &Path) -> Result<Self> {
-        let reader = load_file(&path)?;
-        serde_yml::from_reader(reader)
-            .map_err(|e| AssetError::new_format(path.to_owned(), false, e))
+        let reader = load_file(path)?;
+        CURRENT_ASSET.with(|current_asset| current_asset.borrow_mut().push(path.to_owned()));
+        let result = serde_yml::from_reader(reader)
+            .map_err(|e| AssetError::new_format(path.to_owned(), false, e));
+        CURRENT_ASSET.with(|current_asset| current_asset.borrow_mut().pop());
+        result
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(try_from = "PathBuf")]
+pub struct SubAsset<T: Asset>(pub T);
+
+impl<T: Asset> TryFrom<PathBuf> for SubAsset<T> {
+    type Error = AssetError;
+    fn try_from(value: PathBuf) -> Result<Self> {
+        T::load(&asset_relative_path(&value)).map(SubAsset)
     }
 }
 

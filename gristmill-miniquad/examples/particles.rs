@@ -119,7 +119,7 @@ impl Game for MyGame {
         self.renderer.begin_render(&mut self.context, Color::BLACK);
         self.renderer
             .set_camera(&mut self.context, self.camera.transform());
-        self.scene.draw(&mut self.renderer, &mut self.context);
+        self.scene.draw(&mut self.context, &mut self.renderer, ..);
         self.renderer.end_render(&mut self.context)
     }
 }

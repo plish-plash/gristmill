@@ -71,7 +71,7 @@ impl YamlAsset for SpriteSheetDefinition {}
 #[derive(Clone)]
 pub struct SpriteSheet<L, P> {
     sprite: Sprite<L, P>,
-    texture_size: Vec2,
+    texture_size: Size,
     frame_size: Vec2,
     frames: HashMap<String, Vec<Pos2>>,
     current_frame: Rect,
@@ -97,7 +97,7 @@ impl<L, P> SpriteSheet<L, P> {
                 uv: UvRect::default(),
                 color: Color::WHITE,
             },
-            texture_size: texture_size.to_vec2(),
+            texture_size,
             frame_size: definition.frame_size,
             frames: definition.frames,
             current_frame: Rect::ZERO,

@@ -40,3 +40,9 @@ impl Color {
         Color { r, g, b, a }
     }
 }
+
+impl Default for Color {
+    fn default() -> Self {
+        Color::WHITE
+    }
+}

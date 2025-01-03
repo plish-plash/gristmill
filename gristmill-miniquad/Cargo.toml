@@ -6,4 +6,5 @@ edition = "2021"
 [dependencies]
 gristmill = { path = ".." }
 log = "*"
+serde = { version = "1.0", features = ["derive"] }
 miniquad = "0.4"

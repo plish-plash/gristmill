@@ -12,6 +12,7 @@ pub mod text;
 use std::{
     collections::{BTreeMap, HashMap},
     hash::Hash,
+    ops::RangeBounds,
 };
 
 pub use emath as math;
@@ -82,15 +83,18 @@ impl<L: Ord, P: Eq + Hash, I> Scene<L, P, I> {
     {
         self.get_batch(layer, params).0.extend(instances);
     }
-    pub fn draw<R>(&mut self, renderer: &mut R, context: &mut R::Context)
+    pub fn draw<R, B>(&mut self, context: &mut R::Context, renderer: &mut R, layers: B)
     where
         R: Renderer<Params = P, Instance = I>,
+        B: RangeBounds<L>,
     {
-        for layer in self.0.values_mut() {
-            for (params, batch) in layer.0.iter_mut() {
-                if !batch.0.is_empty() {
-                    renderer.draw(context, params, &batch.0);
-                    batch.0.clear();
+        for (layer, value) in self.0.iter_mut() {
+            if layers.contains(layer) {
+                for (params, batch) in value.0.iter_mut() {
+                    if !batch.0.is_empty() {
+                        renderer.draw(context, params, &batch.0);
+                        batch.0.clear();
+                    }
                 }
             }
         }

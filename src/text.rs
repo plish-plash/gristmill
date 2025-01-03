@@ -13,6 +13,7 @@ use crate::{
     asset::{self, Asset, AssetError},
     color::Color,
     scene2d::Instance,
+    style::{style, style_or},
     Scene, Size,
 };
 
@@ -50,6 +51,12 @@ impl Font {
             scale,
         }
     }
+    pub fn from_style(class: &str) -> Self {
+        Font {
+            font_id: FontId(style(class, "font-id")),
+            scale: style_or(class, "font-scale", 24.0),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -61,6 +68,23 @@ pub struct Text<'a, L> {
     pub font: Font,
     pub color: Color,
     pub text: Cow<'a, str>,
+}
+
+impl<'a, L> Text<'a, L> {
+    pub fn map_layer<L2, F>(self, f: F) -> Text<'a, L2>
+    where
+        F: FnOnce(L) -> L2,
+    {
+        Text {
+            layer: f(self.layer),
+            position: self.position,
+            align: self.align,
+            wrap: self.wrap,
+            font: self.font,
+            color: self.color,
+            text: self.text,
+        }
+    }
 }
 
 #[derive(Clone, PartialEq)]

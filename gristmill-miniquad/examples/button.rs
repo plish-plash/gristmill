@@ -12,6 +12,8 @@ use gristmill::{
 };
 use gristmill_miniquad::{Context, Game, InputEvent, MouseButton, Renderer2D, Scene2D};
 
+type Layer = GuiSubLayer;
+
 struct GameAssets {
     fonts: Vec<FontAsset>,
 }
@@ -36,12 +38,12 @@ fn gui_mouse_button(button: MouseButton) -> Option<GuiMouseButton> {
 }
 
 enum GuiPrimitive {
-    ColorRect(ColorRect<GuiLayer>),
-    Text(Text<'static, GuiLayer>),
+    ColorRect(ColorRect<Layer>),
+    Text(Text<'static, Layer>),
 }
 
 impl GuiPrimitive {
-    fn draw(&self, scene: &mut Scene2D<GuiLayer>, text_brush: &mut TextBrush<GuiLayer>) {
+    fn draw(&self, scene: &mut Scene2D<Layer>, text_brush: &mut TextBrush<Layer>) {
         match self {
             GuiPrimitive::ColorRect(color_rect) => color_rect.draw(scene),
             GuiPrimitive::Text(text) => text_brush.queue(text),
@@ -49,7 +51,7 @@ impl GuiPrimitive {
     }
 }
 impl DrawPrimitive for GuiPrimitive {
-    fn from_text(text: Text<'static, GuiLayer>) -> Self {
+    fn from_text(text: Text<'static, Layer>) -> Self {
         GuiPrimitive::Text(text)
     }
     fn from_button_background(rect: Rect, state: ButtonState) -> Self {
@@ -59,7 +61,7 @@ impl DrawPrimitive for GuiPrimitive {
             ButtonState::Press => Color::new_rgb(0.4, 0.4, 0.4),
             ButtonState::Disable => Color::new_rgba(0.5, 0.5, 0.5, 0.5),
         };
-        GuiPrimitive::ColorRect(ColorRect(GuiLayer::Background, color, rect))
+        GuiPrimitive::ColorRect(ColorRect(Layer::Background, color, rect))
     }
 }
 
@@ -67,8 +69,8 @@ struct MyGame {
     context: Context,
     renderer: Renderer2D,
     camera: ViewportCamera,
-    scene: Scene2D<GuiLayer>,
-    text_brush: TextBrush<GuiLayer>,
+    scene: Scene2D<Layer>,
+    text_brush: TextBrush<Layer>,
     gui_input: GuiInput,
     gui: Gui<(), GuiPrimitive>,
     container: Container<GuiPrimitive>,
@@ -115,7 +117,7 @@ impl Game for MyGame {
     }
 
     fn input(&mut self, event: InputEvent) {
-        if let Some(event) = GuiInputEvent::from_input(event, gui_mouse_button) {
+        if let Some(event) = GuiInputEvent::from_input(&event, gui_mouse_button) {
             self.gui_input.process(event);
         }
     }
@@ -144,7 +146,7 @@ impl Game for MyGame {
         self.renderer.begin_render(&mut self.context, Color::BLACK);
         self.renderer
             .set_camera(&mut self.context, self.camera.transform());
-        self.scene.draw(&mut self.renderer, &mut self.context);
+        self.scene.draw(&mut self.context, &mut self.renderer, ..);
         self.renderer.end_render(&mut self.context)
     }
 }
