@@ -19,7 +19,7 @@ struct GameAssets {
 impl GameAssets {
     fn load(context: &mut Context) -> Self {
         GameAssets {
-            player: Texture::load(context, Path::new("examples/assets/player.png")).unwrap(),
+            player: Texture::load(context, Path::new("player.png")).unwrap(),
         }
     }
 }
@@ -118,5 +118,6 @@ impl Game for MyGame {
 }
 
 fn main() {
+    gristmill::asset::set_base_path("examples/assets").unwrap();
     gristmill_miniquad::start::<MyGame>(Default::default());
 }

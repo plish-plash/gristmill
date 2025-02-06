@@ -33,10 +33,10 @@ impl Color {
         b: 1.0,
         a: 1.0,
     };
-    pub fn new_rgb(r: f32, g: f32, b: f32) -> Self {
+    pub const fn new_rgb(r: f32, g: f32, b: f32) -> Self {
         Color { r, g, b, a: 1.0 }
     }
-    pub fn new_rgba(r: f32, g: f32, b: f32, a: f32) -> Self {
+    pub const fn new_rgba(r: f32, g: f32, b: f32, a: f32) -> Self {
         Color { r, g, b, a }
     }
 }

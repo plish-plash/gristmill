@@ -99,14 +99,27 @@ impl<L: Ord, P: Eq + Hash, I> Scene<L, P, I> {
             }
         }
     }
+    pub fn draw_layer<R>(&mut self, context: &mut R::Context, renderer: &mut R, layer: L)
+    where
+        R: Renderer<Params = P, Instance = I>,
+    {
+        if let Some(layer) = self.0.get_mut(&layer) {
+            for (params, batch) in layer.0.iter_mut() {
+                if !batch.0.is_empty() {
+                    renderer.draw(context, params, &batch.0);
+                    batch.0.clear();
+                }
+            }
+        }
+    }
 }
 
-#[derive(Clone)]
+#[derive(Default, Clone)]
 pub struct DrawMetrics(u32);
 
 impl DrawMetrics {
     pub fn new() -> Self {
-        DrawMetrics(0)
+        DrawMetrics::default()
     }
     pub fn draw_call(&mut self) {
         self.0 += 1;

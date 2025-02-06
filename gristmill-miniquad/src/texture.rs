@@ -6,7 +6,7 @@ use std::{
 };
 
 use gristmill::{
-    asset::{asset_relative_path, Asset, AssetError, Image},
+    asset::{sub_asset_path, Asset, AssetError, Image},
     Size,
 };
 use miniquad::{FilterMode, MipmapFilterMode, TextureId};
@@ -97,6 +97,6 @@ impl TextureAsset {
 impl TryFrom<PathBuf> for TextureAsset {
     type Error = AssetError;
     fn try_from(value: PathBuf) -> Result<Self, Self::Error> {
-        TextureLoader::load(asset_relative_path(&value))
+        TextureLoader::load(sub_asset_path("textures", true, &value))
     }
 }

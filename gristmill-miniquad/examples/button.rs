@@ -21,10 +21,10 @@ struct GameAssets {
 impl GameAssets {
     fn load() -> Self {
         StyleSheet::default()
-            .load_global(Path::new("examples/assets/style.yaml"))
+            .load_global(Path::new("style.yaml"))
             .unwrap();
         GameAssets {
-            fonts: Vec::<FontAsset>::load(Path::new("examples/assets/fonts.yaml")).unwrap(),
+            fonts: Vec::<FontAsset>::load(Path::new("fonts.yaml")).unwrap(),
         }
     }
 }
@@ -152,5 +152,6 @@ impl Game for MyGame {
 }
 
 fn main() {
+    gristmill::asset::set_base_path("examples/assets").unwrap();
     gristmill_miniquad::start::<MyGame>(Default::default());
 }

@@ -1,15 +1,16 @@
 use std::{
     cell::RefCell,
+    collections::HashMap,
     fs::File,
     path::{Path, PathBuf},
+    sync::OnceLock,
 };
-
-use serde::Deserialize;
 
 use crate::Size;
 
 pub type BufReader = std::io::BufReader<File>;
 pub type BufWriter = std::io::BufWriter<File>;
+use serde::Serialize;
 pub use serde_yml::Value as YamlValue;
 
 #[derive(Debug)]
@@ -109,26 +110,73 @@ pub trait Asset: Sized {
     fn load(path: &Path) -> Result<Self>;
 }
 
+pub fn set_cwd_from_executable() -> std::result::Result<(), std::io::Error> {
+    let mut path = std::env::current_exe().expect("couldn't get executable path");
+    path.pop();
+    std::env::set_current_dir(path)
+}
+
+static BASE_PATH: OnceLock<PathBuf> = OnceLock::new();
+
+pub fn set_base_path(base_path: &str) -> std::result::Result<(), PathBuf> {
+    BASE_PATH.set(Path::new(base_path).to_path_buf())
+}
+pub fn file_path(path: &Path) -> PathBuf {
+    let mut file_path = BASE_PATH.get().cloned().unwrap_or_default();
+    file_path.push(path);
+    file_path
+}
+
 pub fn load_file(path: &Path) -> Result<BufReader> {
     log::debug!("Load file: {}", path.display());
-    let file = File::open(path).map_err(|e| AssetError::new_io(path.to_owned(), false, e))?;
+    let file =
+        File::open(file_path(path)).map_err(|e| AssetError::new_io(path.to_owned(), false, e))?;
     Ok(BufReader::new(file))
+}
+pub fn save_file(path: &Path) -> Result<BufWriter> {
+    log::debug!("Save file: {}", path.display());
+    let file =
+        File::create(file_path(path)).map_err(|e| AssetError::new_io(path.to_owned(), true, e))?;
+    Ok(BufWriter::new(file))
 }
 
 thread_local! {
-    static CURRENT_ASSET: RefCell<Vec<PathBuf>> = RefCell::new(Vec::new());
+    static CURRENT_ASSET: RefCell<Vec<PathBuf>> = const { RefCell::new(Vec::new()) };
 }
 
-pub fn asset_relative_path(path: &Path) -> PathBuf {
-    let current_asset = CURRENT_ASSET.with(|current_asset| current_asset.borrow().last().cloned());
-    if let Some(mut asset_path) = current_asset {
-        asset_path.pop();
-        asset_path.push(path);
-        asset_path
-    } else {
-        log::warn!("asset_relative_path: no current asset");
-        path.to_owned()
+pub fn sub_asset_path(base_path: &str, relative: bool, path: &Path) -> PathBuf {
+    let mut buf = Path::new(base_path).to_path_buf();
+    if relative {
+        let current = CURRENT_ASSET.with(|current_asset| {
+            current_asset
+                .borrow()
+                .last()
+                .and_then(|path| path.file_stem())
+                .map(ToOwned::to_owned)
+        });
+        if let Some(current) = current {
+            buf.push(current);
+        } else {
+            log::warn!("sub_asset_path: no current asset");
+        }
     }
+    buf.push(path);
+    buf
+}
+
+#[macro_export]
+macro_rules! impl_sub_asset {
+    ($type:ident, $base_path:expr, $relative:expr) => {
+        impl TryFrom<std::path::PathBuf> for $type {
+            type Error = $crate::asset::AssetError;
+            fn try_from(value: std::path::PathBuf) -> $crate::asset::Result<Self> {
+                $crate::asset::Asset::load(&$crate::asset::sub_asset_path(
+                    $base_path, $relative, &value,
+                ))
+                .map($type)
+            }
+        }
+    };
 }
 
 pub trait YamlAsset: serde::de::DeserializeOwned {}
@@ -144,15 +192,16 @@ impl<T: YamlAsset> Asset for T {
     }
 }
 
-#[derive(Deserialize)]
-#[serde(try_from = "PathBuf")]
-pub struct SubAsset<T: Asset>(pub T);
+pub trait YamlData: serde::de::DeserializeOwned {}
 
-impl<T: Asset> TryFrom<PathBuf> for SubAsset<T> {
-    type Error = AssetError;
-    fn try_from(value: PathBuf) -> Result<Self> {
-        T::load(&asset_relative_path(&value)).map(SubAsset)
-    }
+impl<T: YamlData> YamlAsset for Vec<T> {}
+impl<T: YamlData> YamlAsset for HashMap<String, T> {}
+impl<T: YamlData> YamlAsset for HashMap<String, Vec<T>> {}
+
+pub fn save_yaml_file<T: Serialize>(path: &Path, value: &T) -> Result<()> {
+    let writer = save_file(path)?;
+    serde_yml::to_writer(writer, value)
+        .map_err(|e| AssetError::new_format(path.to_owned(), true, e))
 }
 
 pub struct Image {
@@ -163,7 +212,7 @@ pub struct Image {
 impl Asset for Image {
     fn load(path: &Path) -> Result<Self> {
         use png::*;
-        let reader = load_file(&path)?;
+        let reader = load_file(path)?;
         let mut decoder = Decoder::new(reader);
         decoder.set_transformations(Transformations::ALPHA);
         let mut image_reader = decoder
@@ -195,24 +244,5 @@ impl Asset for Image {
             size: Size::new(info.width, info.height),
             data,
         })
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(transparent)]
-pub struct AssetList(pub Vec<PathBuf>);
-impl YamlAsset for AssetList {}
-
-impl<T: Asset> Asset for Vec<T> {
-    fn load(path: &Path) -> Result<Vec<T>> {
-        let mut base_path = path.to_owned();
-        base_path.pop();
-        let list = AssetList::load(path)?;
-        let mut assets = Vec::new();
-        for asset_path in list.0 {
-            let asset = T::load(&base_path.join(asset_path))?;
-            assets.push(asset);
-        }
-        Ok(assets)
     }
 }

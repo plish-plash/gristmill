@@ -16,9 +16,9 @@ pub type InputEvent = gristmill::input::InputEvent<KeyCode, MouseButton>;
 pub type Context = Box<dyn RenderingBackend>;
 
 pub use texture::*;
-// pub mod window {
-//     pub use miniquad::window::{order_quit, request_quit, screen_size};
-// }
+pub mod window {
+    pub use miniquad::window::{order_quit, request_quit, screen_size};
+}
 
 mod shader {
     use miniquad::*;
@@ -30,7 +30,7 @@ mod shader {
     attribute vec4 inst_uv;
     attribute vec4 inst_color;
 
-    varying lowp vec2 texcoord;
+    varying mediump vec2 texcoord;
     varying lowp vec4 color;
 
     uniform vec4 transform;
@@ -43,7 +43,7 @@ mod shader {
     }"#;
 
     pub const FRAGMENT: &str = r#"#version 100
-    varying lowp vec2 texcoord;
+    varying mediump vec2 texcoord;
     varying lowp vec4 color;
 
     uniform sampler2D tex;
@@ -296,7 +296,7 @@ struct Stage<G> {
 
 impl<G: Game> Stage<G> {
     fn new() -> Self {
-        let context = window::new_rendering_backend();
+        let context = miniquad::window::new_rendering_backend();
         let screen_size: Vec2 = window::screen_size().into();
         log::info!("Window size: {}x{}", screen_size.x, screen_size.y);
         Stage {

@@ -1,5 +1,6 @@
 use std::{
-    any::Any, borrow::Cow, cell::RefCell, collections::BTreeMap, marker::PhantomData, rc::Rc,
+    any::Any, borrow::Cow, cell::RefCell, collections::BTreeMap, hash::Hash, marker::PhantomData,
+    rc::Rc,
 };
 
 use emath::{pos2, vec2, Align2, Pos2, Rect, Vec2};
@@ -9,7 +10,7 @@ use crate::{
     color::Color,
     input::{InputEvent, Trigger},
     style::{style, style_or},
-    text::{Font, Text},
+    text::{Font, Text, TextBrush},
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -393,6 +394,7 @@ impl GuiInputEvent {
     }
 }
 
+#[derive(Default)]
 pub struct GuiInput {
     pub pointer: Pos2,
     pub primary: Trigger,
@@ -401,11 +403,7 @@ pub struct GuiInput {
 
 impl GuiInput {
     pub fn new() -> Self {
-        GuiInput {
-            pointer: Pos2::ZERO,
-            primary: Trigger::new(),
-            secondary: Trigger::new(),
-        }
+        GuiInput::default()
     }
     pub fn process(&mut self, event: GuiInputEvent) {
         match event {
@@ -443,15 +441,16 @@ impl<L: Ord, T: 'static> Gui<L, T> {
         }
     }
     pub fn layout(&mut self, layer: L, container: &Container<T>, rect: Rect) {
-        let mut layout = self
+        let layout = self
             .layouts
             .entry(layer)
             .and_modify(|vec| vec.clear())
             .or_default();
-        container.layout(rect, &mut layout);
+        container.layout(rect, layout);
     }
     pub fn handle_input(&mut self, input: &mut GuiInput) -> Option<WidgetEvent> {
         let mut widget_event = None;
+        let mut hit_widget = false;
         for item in self
             .layouts
             .iter_mut()
@@ -459,8 +458,9 @@ impl<L: Ord, T: 'static> Gui<L, T> {
             .flat_map(|(_, layout)| layout.iter_mut().rev())
         {
             let mut widget = item.widget.borrow_mut();
-            if widget_event.is_none() && item.rect.contains(input.pointer) {
-                if let Some(event) = widget.handle_input(item.rect, &input) {
+            if !hit_widget && item.rect.contains(input.pointer) {
+                hit_widget = true;
+                if let Some(event) = widget.handle_input(item.rect, input) {
                     widget_event = Some(event);
                 }
             } else {
@@ -506,6 +506,28 @@ impl<T> Label<T> {
     }
     pub fn set_text<S: Into<Cow<'static, str>>>(&mut self, text: S) {
         self.text = text.into();
+    }
+    pub fn autosize<L>(&mut self, text_brush: &mut TextBrush<L>, layer: L)
+    where
+        L: Clone + Ord + PartialEq + Hash + 'static,
+    {
+        let size = text_brush.text_bounds(
+            layer,
+            self.align,
+            if self.wrap {
+                Some(self.layout.size.x)
+            } else {
+                None
+            },
+            self.font,
+            &self.text,
+        );
+        if let Some(size) = size {
+            if !self.wrap {
+                self.layout.size.x = size.width();
+            }
+            self.layout.size.y = size.height();
+        }
     }
 }
 

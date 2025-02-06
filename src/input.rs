@@ -8,6 +8,7 @@ pub enum InputEvent<Key, MouseButton> {
     MouseButton { button: MouseButton, pressed: bool },
 }
 
+#[derive(Default)]
 pub struct Trigger {
     pressed: bool,
     just_pressed: bool,
@@ -16,11 +17,7 @@ pub struct Trigger {
 
 impl Trigger {
     pub fn new() -> Self {
-        Trigger {
-            pressed: false,
-            just_pressed: false,
-            just_released: false,
-        }
+        Trigger::default()
     }
     pub fn pressed(&self) -> bool {
         self.pressed

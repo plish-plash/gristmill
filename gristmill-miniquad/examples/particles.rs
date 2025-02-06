@@ -18,7 +18,7 @@ struct GameAssets {
 impl GameAssets {
     fn load(context: &mut Context) -> Self {
         GameAssets {
-            particle: Texture::load(context, Path::new("examples/assets/particle.png")).unwrap(),
+            particle: Texture::load(context, Path::new("particle.png")).unwrap(),
         }
     }
 }
@@ -125,5 +125,6 @@ impl Game for MyGame {
 }
 
 fn main() {
+    gristmill::asset::set_base_path("examples/assets").unwrap();
     gristmill_miniquad::start::<MyGame>(Default::default());
 }
