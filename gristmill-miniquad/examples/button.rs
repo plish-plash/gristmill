@@ -10,7 +10,7 @@ use gristmill::{
     text::{FontAsset, Text, TextBrush},
     DrawMetrics,
 };
-use gristmill_miniquad::{Context, Game, InputEvent, MouseButton, Renderer2D, Scene2D};
+use gristmill_miniquad::{Context, Game, InputEvent, MouseButton, Renderer2D, Scene2D, WindowConfig, WindowSetup};
 
 type Layer = GuiSubLayer;
 
@@ -153,5 +153,5 @@ impl Game for MyGame {
 
 fn main() {
     gristmill::asset::set_base_path("examples/assets").unwrap();
-    gristmill_miniquad::start::<MyGame>(Default::default());
+    gristmill_miniquad::start::<MyGame>(WindowSetup::with_title("Button Example".to_string()), WindowConfig::default());
 }

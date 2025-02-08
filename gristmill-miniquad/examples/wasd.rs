@@ -7,7 +7,7 @@ use gristmill::{
     DrawMetrics,
 };
 use gristmill_miniquad::{
-    Context, DrawParams, Game, InputEvent, KeyCode, Renderer2D, Scene2D, Texture,
+    Context, DrawParams, Game, InputEvent, KeyCode, Renderer2D, Scene2D, Texture, WindowConfig, WindowSetup
 };
 
 type Layer = u32;
@@ -119,5 +119,5 @@ impl Game for MyGame {
 
 fn main() {
     gristmill::asset::set_base_path("examples/assets").unwrap();
-    gristmill_miniquad::start::<MyGame>(Default::default());
+    gristmill_miniquad::start::<MyGame>(WindowSetup::with_title("WASD Example".to_string()), WindowConfig::default());
 }

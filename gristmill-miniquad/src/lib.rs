@@ -1,24 +1,19 @@
 mod texture;
+pub mod window;
 
 use std::time::{Duration, Instant};
 
 use gristmill::{
-    color::Color,
-    console,
-    math::{Pos2, Vec2},
-    scene2d::{CameraTransform, Instance},
-    DrawMetrics, Renderer, Size,
+    color::Color, console, math::{Pos2, Vec2}, scene2d::{CameraTransform, Instance}, DrawMetrics, Renderer, Size
 };
 use miniquad::*;
 
-pub use miniquad::{conf::Conf as WindowConfig, KeyCode, MouseButton};
+pub use miniquad::{KeyCode, MouseButton};
 pub type InputEvent = gristmill::input::InputEvent<KeyCode, MouseButton>;
 pub type Context = Box<dyn RenderingBackend>;
 
 pub use texture::*;
-pub mod window {
-    pub use miniquad::window::{order_quit, request_quit, screen_size};
-}
+pub use window::{WindowSetup, WindowConfig};
 
 mod shader {
     use miniquad::*;
@@ -334,6 +329,7 @@ impl<G: Game> EventHandler for Stage<G> {
     //     }
     // }
     fn resize_event(&mut self, width: f32, height: f32) {
+        window::on_resize(width, height);
         self.game.resize(Vec2::new(width, height));
     }
 
@@ -377,7 +373,9 @@ impl<G: Game> EventHandler for Stage<G> {
     }
 }
 
-pub fn start<G: Game>(conf: WindowConfig) {
+pub fn start<G: Game>(window_setup: WindowSetup, default_config: WindowConfig) {
     console::init_logging();
-    miniquad::start(conf, move || Box::new(Stage::<G>::new()));
+    let config = window::load_config(window_setup, default_config);
+    miniquad::start(config, move || Box::new(Stage::<G>::new()));
+    window::save_config();
 }
