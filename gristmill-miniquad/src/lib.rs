@@ -1,10 +1,10 @@
 mod texture;
 pub mod window;
 
-use std::time::{Duration, Instant};
+use std::{path::Path, time::{Duration, Instant}};
 
 use gristmill::{
-    color::Color, console, math::{Pos2, Vec2}, scene2d::{CameraTransform, Instance}, DrawMetrics, Renderer, Size
+    color::Color, logger, math::{Pos2, Vec2}, scene2d::{CameraTransform, Instance}, DrawMetrics, Renderer, Size
 };
 use miniquad::*;
 
@@ -320,7 +320,7 @@ impl<G: Game> EventHandler for Stage<G> {
     fn draw(&mut self) {
         let working = (1.0 - self.sleep_time.div_duration_f32(self.frame_time)) * 100.0;
         let metrics = self.game.draw();
-        console::set_message(format!("Working: {:.1}% | {}", working, metrics,));
+        logger::set_message(format!("Working: {:.1}% | {}", working, metrics,));
     }
 
     // fn quit_requested_event(&mut self) {
@@ -374,7 +374,7 @@ impl<G: Game> EventHandler for Stage<G> {
 }
 
 pub fn start<G: Game>(window_setup: WindowSetup, default_config: WindowConfig) {
-    console::init_logging();
+    logger::init_logging(Some(Path::new("log.txt")));
     let config = window::load_config(window_setup, default_config);
     miniquad::start(config, move || Box::new(Stage::<G>::new()));
     window::save_config();

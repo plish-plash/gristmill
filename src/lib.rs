@@ -1,6 +1,6 @@
 pub mod asset;
 pub mod color;
-pub mod console;
+pub mod logger;
 pub mod gui;
 pub mod input;
 pub mod lang;
