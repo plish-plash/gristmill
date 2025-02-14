@@ -1,7 +1,13 @@
-use std::{fs::File, io::Write, panic::PanicHookInfo, path::Path, sync::{LazyLock, Mutex}};
+use std::{
+    fs::File,
+    io::Write,
+    panic::PanicHookInfo,
+    path::Path,
+    sync::{LazyLock, Mutex},
+};
 
-use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use console::style;
+use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use log::Level;
 
 static PROGRESS_BAR: LazyLock<ProgressBar> = LazyLock::new(|| {
@@ -36,7 +42,13 @@ impl log::Log for Logger {
         });
         let mut log_file = LOG_FILE.lock().unwrap();
         if let Some(file) = log_file.as_mut() {
-            let res = writeln!(file, "{:5} [{}] {}", record.level(), record.target(), record.args());
+            let res = writeln!(
+                file,
+                "{:5} [{}] {}",
+                record.level(),
+                record.target(),
+                record.args()
+            );
             if res.is_err() {
                 *log_file = None;
             }
@@ -51,7 +63,12 @@ fn panic_handler(panic_info: &PanicHookInfo) {
         let _ = writeln!(file, "{}", panic_info);
     }
     PROGRESS_BAR.finish();
-    eprintln!("{}", style("The application has panicked. See the log for details.").red().for_stderr());
+    eprintln!(
+        "{}",
+        style("The application has panicked. See the log for details.")
+            .red()
+            .for_stderr()
+    );
 }
 
 pub fn init_logging(log_file: Option<&Path>) {

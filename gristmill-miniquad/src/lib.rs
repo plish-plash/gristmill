@@ -1,10 +1,17 @@
 mod texture;
 pub mod window;
 
-use std::{path::Path, time::{Duration, Instant}};
+use std::{
+    path::Path,
+    time::{Duration, Instant},
+};
 
 use gristmill::{
-    color::Color, logger, math::{Pos2, Vec2}, scene2d::{CameraTransform, Instance}, DrawMetrics, Renderer, Size
+    color::Color,
+    logger,
+    math::{Pos2, Vec2},
+    scene2d::{CameraTransform, Instance},
+    DrawMetrics, Renderer, Size,
 };
 use miniquad::*;
 
@@ -13,7 +20,7 @@ pub type InputEvent = gristmill::input::InputEvent<KeyCode, MouseButton>;
 pub type Context = Box<dyn RenderingBackend>;
 
 pub use texture::*;
-pub use window::{WindowSetup, WindowConfig};
+pub use window::{WindowConfig, WindowSetup};
 
 mod shader {
     use miniquad::*;

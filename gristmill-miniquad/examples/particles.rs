@@ -7,7 +7,9 @@ use gristmill::{
     scene2d::{Camera, Instance, UvRect},
     DrawMetrics,
 };
-use gristmill_miniquad::{Context, DrawParams, Game, InputEvent, Renderer2D, Scene2D, Texture, WindowConfig, WindowSetup};
+use gristmill_miniquad::{
+    Context, DrawParams, Game, InputEvent, Renderer2D, Scene2D, Texture, WindowConfig, WindowSetup,
+};
 
 type Layer = u32;
 
@@ -126,5 +128,8 @@ impl Game for MyGame {
 
 fn main() {
     gristmill::asset::set_base_path("examples/assets").unwrap();
-    gristmill_miniquad::start::<MyGame>(WindowSetup::with_title("Particles Example".to_string()), WindowConfig::default());
+    gristmill_miniquad::start::<MyGame>(
+        WindowSetup::with_title("Particles Example".to_string()),
+        WindowConfig::default(),
+    );
 }

@@ -1,9 +1,9 @@
 pub mod asset;
 pub mod color;
-pub mod logger;
 pub mod gui;
 pub mod input;
 pub mod lang;
+pub mod logger;
 pub mod particles;
 pub mod scene2d;
 pub mod style;
