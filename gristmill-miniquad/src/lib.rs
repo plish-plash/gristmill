@@ -8,6 +8,7 @@ use std::{
 
 use gristmill::{
     color::Color,
+    gui::GuiLayer,
     logger,
     math::{Pos2, Vec2},
     scene2d::{CameraTransform, Instance},
@@ -164,7 +165,9 @@ impl DrawParams {
     }
 }
 
-pub type Scene2D<L> = gristmill::Scene<L, DrawParams, Instance>;
+pub type Batcher2D = gristmill::Batcher<DrawParams, Instance>;
+pub type GuiBatcher = gristmill::LayerBatcher<GuiLayer, DrawParams, Instance>;
+pub type Sprite2D = gristmill::scene2d::sprite::Sprite<DrawParams>;
 
 pub struct Renderer2D {
     pipeline: Pipeline,

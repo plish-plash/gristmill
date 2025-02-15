@@ -1,7 +1,4 @@
-use std::{
-    any::Any, borrow::Cow, cell::RefCell, collections::BTreeMap, hash::Hash, marker::PhantomData,
-    rc::Rc,
-};
+use std::{any::Any, borrow::Cow, cell::RefCell, hash::Hash, marker::PhantomData, rc::Rc};
 
 use emath::{pos2, vec2, Align2, Pos2, Rect, Vec2};
 use serde::{Deserialize, Serialize};
@@ -11,27 +8,21 @@ use crate::{
     input::{InputEvent, Trigger},
     style::{style, style_or},
     text::{Font, Text, TextBrush},
+    Batch,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum GuiSubLayer {
-    Panel,
+pub enum GuiLayer {
     Background,
-    Content,
+    ContentBackground,
+    ContentForeground,
     Foreground,
+    SuperForeground,
 }
 
 pub trait DrawPrimitive: 'static {
-    fn from_text(text: Text<'static, GuiSubLayer>) -> Self;
-    fn from_button_background(rect: Rect, state: ButtonState) -> Self;
-}
-
-pub struct GuiRenderer<T>(Vec<T>);
-
-impl<T> GuiRenderer<T> {
-    pub fn queue(&mut self, primitive: T) {
-        self.0.push(primitive);
-    }
+    fn from_text(text: Text<'static>) -> Self;
+    fn from_button(rect: Rect, state: ButtonState) -> Self;
 }
 
 #[derive(Default, Clone, Copy)]
@@ -63,18 +54,7 @@ pub struct WidgetLayout<T> {
     pub rect: Rect,
 }
 
-pub struct WidgetLayouts<T>(Vec<WidgetLayout<T>>);
-
-impl<T> WidgetLayouts<T> {
-    pub fn add(&mut self, layout: WidgetLayout<T>) {
-        self.0.push(layout);
-    }
-}
-impl<T> Default for WidgetLayouts<T> {
-    fn default() -> Self {
-        WidgetLayouts(Vec::new())
-    }
-}
+pub type WidgetLayouts<T> = Batch<WidgetLayout<T>>;
 
 pub enum GuiMouseButton {
     Primary,
@@ -162,7 +142,7 @@ pub trait Widget: 'static {
     fn handle_input(&mut self, rect: Rect, input: &GuiInput) -> WidgetInput {
         WidgetInput::Pass
     }
-    fn draw(&self, renderer: &mut GuiRenderer<Self::DrawPrimitive>, rect: Rect);
+    fn draw(&self, batch: &mut Batch<Self::DrawPrimitive>, rect: Rect);
 }
 
 type WidgetHandle<T> = Rc<RefCell<dyn Widget<DrawPrimitive = T>>>;
@@ -188,36 +168,33 @@ impl<T: ?Sized> Clone for WidgetRef<T> {
     }
 }
 
-pub struct Gui<L, T> {
-    layouts: BTreeMap<L, WidgetLayouts<T>>,
+pub struct Gui<Primitive> {
+    layouts: WidgetLayouts<Primitive>,
+    batch: Batch<Primitive>,
 }
 
-impl<L: Ord, T: 'static> Gui<L, T> {
+impl<Primitive: 'static> Gui<Primitive> {
     pub fn new() -> Self {
         Gui {
-            layouts: BTreeMap::new(),
+            layouts: WidgetLayouts::new(),
+            batch: Batch::new(),
         }
     }
-    pub fn layout<W>(&mut self, layer: L, root: &W, rect: Rect)
+    pub fn clear(&mut self) {
+        self.layouts.clear();
+        self.batch.clear();
+    }
+    pub fn layout<W>(&mut self, root: &W, rect: Rect)
     where
-        W: Widget<DrawPrimitive = T>,
+        W: Widget<DrawPrimitive = Primitive>,
     {
-        let layouts = self
-            .layouts
-            .entry(layer)
-            .and_modify(|layouts| layouts.0.clear())
-            .or_default();
-        root.layout_children(layouts, rect);
+        self.clear();
+        root.layout_children(&mut self.layouts, rect);
     }
     pub fn handle_input(&mut self, input: &mut GuiInput) -> Option<WidgetEvent> {
         let mut widget_event = None;
         let mut blocked = false;
-        for item in self
-            .layouts
-            .iter_mut()
-            .rev()
-            .flat_map(|(_, layouts)| layouts.0.iter_mut().rev())
-        {
+        for item in self.layouts.0.iter().rev() {
             let mut widget = item.widget.borrow_mut();
             if !blocked && item.rect.contains(input.pointer) {
                 match widget.handle_input(item.rect, input) {
@@ -235,14 +212,12 @@ impl<L: Ord, T: 'static> Gui<L, T> {
         input.update();
         widget_event
     }
-    pub fn draw(&self, layer: &L) -> Vec<T> {
-        let mut renderer = GuiRenderer(Vec::new());
-        if let Some(layouts) = self.layouts.get(layer) {
-            for item in layouts.0.iter() {
-                item.widget.borrow().draw(&mut renderer, item.rect);
-            }
+    pub fn draw(&mut self) -> &[Primitive] {
+        self.batch.clear();
+        for item in self.layouts.as_slice() {
+            item.widget.borrow().draw(&mut self.batch, item.rect);
         }
-        renderer.0
+        self.batch.as_slice()
     }
 }
 
@@ -499,7 +474,7 @@ impl<T: 'static> Widget for Container<T> {
             main_pos += item_main + self.padding.between;
         }
     }
-    fn draw(&self, _renderer: &mut GuiRenderer<T>, _rect: Rect) {}
+    fn draw(&self, _batch: &mut Batch<T>, _rect: Rect) {}
 }
 
 pub struct GridContainer<T> {
@@ -586,7 +561,7 @@ impl<T: 'static> Widget for GridContainer<T> {
             }
         }
     }
-    fn draw(&self, _renderer: &mut GuiRenderer<T>, _rect: Rect) {}
+    fn draw(&self, _batch: &mut Batch<T>, _rect: Rect) {}
 }
 
 pub struct Label<T> {
@@ -651,9 +626,8 @@ impl<T: DrawPrimitive> Widget for Label<T> {
     fn layout_info(&self) -> LayoutInfo {
         self.layout
     }
-    fn draw(&self, renderer: &mut GuiRenderer<T>, rect: Rect) {
-        renderer.queue(T::from_text(Text {
-            layer: GuiSubLayer::Content,
+    fn draw(&self, batch: &mut Batch<T>, rect: Rect) {
+        batch.add(T::from_text(Text {
             position: self.align.pos_in_rect(&rect),
             align: self.align,
             wrap: if self.wrap { Some(rect.width()) } else { None },
@@ -731,10 +705,9 @@ impl<T: DrawPrimitive> Widget for Button<T> {
         }
         WidgetInput::Block
     }
-    fn draw(&self, renderer: &mut GuiRenderer<T>, rect: Rect) {
-        renderer.queue(T::from_button_background(rect, self.state));
-        renderer.queue(T::from_text(Text {
-            layer: GuiSubLayer::Content,
+    fn draw(&self, batch: &mut Batch<T>, rect: Rect) {
+        batch.add(T::from_button(rect, self.state));
+        batch.add(T::from_text(Text {
             position: rect.center(),
             align: Align2::CENTER_CENTER,
             wrap: None,

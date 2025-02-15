@@ -3,15 +3,13 @@ use std::path::Path;
 use gristmill::{
     color::Color,
     math::{Pos2, Rect, Vec2},
-    scene2d::{sprite::Sprite, Camera, UvRect},
-    DrawMetrics,
+    scene2d::{Camera, Instance, UvRect},
+    DrawMetrics, Renderer,
 };
 use gristmill_miniquad::{
-    Context, DrawParams, Game, InputEvent, KeyCode, Renderer2D, Scene2D, Texture, WindowConfig,
-    WindowSetup,
+    Batcher2D, Context, DrawParams, Game, InputEvent, KeyCode, Renderer2D, Sprite2D, Texture,
+    WindowConfig, WindowSetup,
 };
-
-type Layer = u32;
 
 struct GameAssets {
     player: Texture,
@@ -47,32 +45,58 @@ impl GameInput {
     }
 }
 
-struct MyGame {
-    assets: GameAssets,
-    input: GameInput,
+struct GameRenderer {
     context: Context,
     renderer: Renderer2D,
+    batcher: Batcher2D,
     camera: Camera,
-    scene: Scene2D<Layer>,
-    player_position: Pos2,
+}
+
+impl GameRenderer {
+    fn render(&mut self) -> DrawMetrics {
+        self.renderer.begin_render(&mut self.context, Color::BLACK);
+        self.renderer
+            .set_camera(&mut self.context, self.camera.transform());
+        self.renderer
+            .draw_batches(&mut self.context, self.batcher.batches());
+        self.batcher.clear();
+        self.renderer.end_render(&mut self.context)
+    }
+}
+
+struct MyGame {
+    _assets: GameAssets,
+    input: GameInput,
+    renderer: GameRenderer,
+    player: Sprite2D,
 }
 
 impl Game for MyGame {
     fn init(mut context: Context, screen_size: Vec2) -> Self {
         let assets = GameAssets::load(&mut context);
         let renderer = Renderer2D::new(&mut context, None);
-        MyGame {
-            assets,
-            input: GameInput::default(),
-            context,
-            renderer,
-            camera: Camera {
-                screen_size,
-                center: Pos2::ZERO,
-                scale: 1.0,
+        let player = Sprite2D {
+            params: DrawParams::texture(&assets.player),
+            instance: Instance {
+                rect: Rect::from_center_size(Pos2::ZERO, assets.player.size().to_vec2()),
+                uv: UvRect::default(),
+                color: Color::WHITE,
             },
-            scene: Scene2D::new(),
-            player_position: Pos2::ZERO,
+        };
+        MyGame {
+            _assets: assets,
+            input: GameInput::default(),
+            renderer: GameRenderer {
+                context,
+                renderer,
+                batcher: Batcher2D::new(),
+                camera: Camera {
+                    screen_size,
+                    center: Pos2::ZERO,
+                    scale: 1.0,
+                },
+            },
+            player,
         }
     }
 
@@ -82,39 +106,29 @@ impl Game for MyGame {
 
     fn update(&mut self, dt: f32) {
         const SPEED: f32 = 128.0;
+        let mut movement = Vec2::ZERO;
         if self.input.up {
-            self.player_position.y -= SPEED * dt;
+            movement.y -= SPEED * dt;
         }
         if self.input.down {
-            self.player_position.y += SPEED * dt;
+            movement.y += SPEED * dt;
         }
         if self.input.left {
-            self.player_position.x -= SPEED * dt;
+            movement.x -= SPEED * dt;
         }
         if self.input.right {
-            self.player_position.x += SPEED * dt;
+            movement.x += SPEED * dt;
         }
+        self.player.instance.rect = self.player.instance.rect.translate(movement);
     }
 
     fn resize(&mut self, screen_size: Vec2) {
-        self.camera.screen_size = screen_size;
+        self.renderer.camera.screen_size = screen_size;
     }
 
     fn draw(&mut self) -> DrawMetrics {
-        Sprite {
-            layer: 0,
-            params: DrawParams::texture(&self.assets.player),
-            rect: Rect::from_center_size(self.player_position, self.assets.player.size().to_vec2()),
-            uv: UvRect::default(),
-            color: Color::WHITE,
-        }
-        .draw(&mut self.scene);
-
-        self.renderer.begin_render(&mut self.context, Color::BLACK);
-        self.renderer
-            .set_camera(&mut self.context, self.camera.transform());
-        self.scene.draw(&mut self.context, &mut self.renderer, ..);
-        self.renderer.end_render(&mut self.context)
+        self.player.draw(&mut self.renderer.batcher);
+        self.renderer.render()
     }
 }
 

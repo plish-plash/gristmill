@@ -7,43 +7,31 @@ use super::{Instance, UvRect};
 use crate::{
     asset::{Asset, AssetError, YamlAsset},
     color::Color,
-    Scene, Size,
+    Batcher, Size,
 };
 
 #[derive(Clone)]
-pub struct Sprite<L, P> {
-    pub layer: L,
-    pub params: P,
-    pub rect: Rect,
-    pub uv: UvRect,
-    pub color: Color,
+pub struct Sprite<T> {
+    pub params: T,
+    pub instance: Instance,
 }
 
-impl<L: Ord + Clone, P: Eq + Hash + Clone> Sprite<L, P> {
-    pub fn draw(&self, scene: &mut Scene<L, P, Instance>) {
-        scene.queue(
-            self.layer.clone(),
-            self.params.clone(),
-            Instance {
-                rect: self.rect,
-                uv: self.uv,
-                color: self.color,
-            },
-        )
+impl<T: Eq + Hash + Clone> Sprite<T> {
+    pub fn draw(&self, batcher: &mut Batcher<T, Instance>) {
+        batcher.add(self.params.clone(), self.instance.clone())
     }
 }
 
-pub struct ColorRect<L>(pub L, pub Color, pub Rect);
+pub struct ColorRect(pub Color, pub Rect);
 
-impl<L: Ord + Clone> ColorRect<L> {
-    pub fn draw<P: Eq + Hash + Default>(&self, scene: &mut Scene<L, P, Instance>) {
-        scene.queue(
-            self.0.clone(),
-            Default::default(),
+impl ColorRect {
+    pub fn draw<T: Eq + Hash + Default>(&self, batcher: &mut Batcher<T, Instance>) {
+        batcher.add(
+            T::default(),
             Instance {
-                rect: self.2,
+                rect: self.1,
                 uv: UvRect::default(),
-                color: self.1,
+                color: self.0,
             },
         )
     }
@@ -69,8 +57,8 @@ impl Default for SpriteSheetDefinition {
 impl YamlAsset for SpriteSheetDefinition {}
 
 #[derive(Clone)]
-pub struct SpriteSheet<L, P> {
-    sprite: Sprite<L, P>,
+pub struct SpriteSheet<T> {
+    sprite: Sprite<T>,
     texture_size: Size,
     frame_size: Vec2,
     frames: HashMap<String, Vec<Pos2>>,
@@ -81,8 +69,8 @@ pub struct SpriteSheet<L, P> {
     frame_time: f32,
 }
 
-impl<L, P> SpriteSheet<L, P> {
-    pub fn new(layer: L, params: P, texture_size: Size, definition: SpriteSheetDefinition) -> Self {
+impl<T> SpriteSheet<T> {
+    pub fn new(params: T, texture_size: Size, definition: SpriteSheetDefinition) -> Self {
         let current_animation = definition
             .frames
             .keys()
@@ -91,11 +79,12 @@ impl<L, P> SpriteSheet<L, P> {
             .to_string();
         let mut sprite_sheet = SpriteSheet {
             sprite: Sprite {
-                layer,
                 params,
-                rect: Rect::from_min_size(Pos2::ZERO, definition.frame_size),
-                uv: UvRect::default(),
-                color: Color::WHITE,
+                instance: Instance {
+                    rect: Rect::from_min_size(Pos2::ZERO, definition.frame_size),
+                    uv: UvRect::default(),
+                    color: Color::WHITE,
+                },
             },
             texture_size,
             frame_size: definition.frame_size,
@@ -109,23 +98,22 @@ impl<L, P> SpriteSheet<L, P> {
         sprite_sheet.set_animation_frame(0);
         sprite_sheet
     }
-    pub fn load(layer: L, params: P, texture_size: Size, path: &Path) -> Result<Self, AssetError> {
+    pub fn load(params: T, texture_size: Size, path: &Path) -> Result<Self, AssetError> {
         Ok(Self::new(
-            layer,
             params,
             texture_size,
             SpriteSheetDefinition::load(path)?,
         ))
     }
 
-    pub fn sprite(&self) -> &Sprite<L, P> {
+    pub fn sprite(&self) -> &Sprite<T> {
         &self.sprite
     }
     pub fn set_position(&mut self, pos: Pos2, anchor: Align2) {
-        self.sprite.rect = anchor.anchor_size(pos, self.frame_size);
+        self.sprite.instance.rect = anchor.anchor_size(pos, self.frame_size);
     }
     pub fn set_color(&mut self, color: Color) {
-        self.sprite.color = color;
+        self.sprite.instance.color = color;
     }
 
     pub fn frame_size(&self) -> Vec2 {
@@ -150,7 +138,7 @@ impl<L, P> SpriteSheet<L, P> {
         self.current_animation_frame = frame % frames.len();
         self.current_frame =
             Rect::from_min_size(frames[self.current_animation_frame], self.frame_size);
-        self.sprite.uv = UvRect::from_region(self.current_frame, self.texture_size);
+        self.sprite.instance.uv = UvRect::from_region(self.current_frame, self.texture_size);
     }
     pub fn update(&mut self, dt: f32) {
         self.frame_time += dt;

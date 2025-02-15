@@ -8,13 +8,13 @@ use gristmill::{
     scene2d::{sprite::ColorRect, ViewportCamera},
     style::StyleSheet,
     text::{FontAsset, Text, TextBrush},
-    DrawMetrics,
+    DrawMetrics, Renderer,
 };
 use gristmill_miniquad::{
-    Context, Game, InputEvent, MouseButton, Renderer2D, Scene2D, WindowConfig, WindowSetup,
+    Context, Game, GuiBatcher, InputEvent, MouseButton, Renderer2D, WindowConfig, WindowSetup,
 };
 
-type Layer = GuiSubLayer;
+type Layer = GuiLayer;
 
 struct GameAssets {
     fonts: Vec<FontAsset>,
@@ -40,41 +40,65 @@ fn gui_mouse_button(button: MouseButton) -> Option<GuiMouseButton> {
 }
 
 enum GuiPrimitive {
-    ColorRect(ColorRect<Layer>),
-    Text(Text<'static, Layer>),
+    ColorRect(ColorRect),
+    Text(Text<'static>),
 }
 
 impl GuiPrimitive {
-    fn draw(&self, scene: &mut Scene2D<Layer>, text_brush: &mut TextBrush<Layer>) {
+    fn draw(&self, batcher: &mut GuiBatcher, text_brush: &mut TextBrush<Layer>) {
         match self {
-            GuiPrimitive::ColorRect(color_rect) => color_rect.draw(scene),
-            GuiPrimitive::Text(text) => text_brush.queue(text),
+            GuiPrimitive::ColorRect(color_rect) => {
+                color_rect.draw(batcher.get_mut(Layer::ContentBackground))
+            }
+            GuiPrimitive::Text(text) => text_brush.queue(Layer::ContentForeground, text),
         }
     }
 }
 impl DrawPrimitive for GuiPrimitive {
-    fn from_text(text: Text<'static, Layer>) -> Self {
+    fn from_text(text: Text<'static>) -> Self {
         GuiPrimitive::Text(text)
     }
-    fn from_button_background(rect: Rect, state: ButtonState) -> Self {
+    fn from_button(rect: Rect, state: ButtonState) -> Self {
         let color = match state {
             ButtonState::Normal => Color::new_rgb(0.5, 0.5, 0.5),
             ButtonState::Hover => Color::new_rgb(0.6, 0.6, 0.6),
             ButtonState::Press => Color::new_rgb(0.4, 0.4, 0.4),
             ButtonState::Disable => Color::new_rgba(0.5, 0.5, 0.5, 0.5),
         };
-        GuiPrimitive::ColorRect(ColorRect(Layer::Background, color, rect))
+        GuiPrimitive::ColorRect(ColorRect(color, rect))
+    }
+}
+
+struct GameRenderer {
+    context: Context,
+    renderer: Renderer2D,
+    batcher: GuiBatcher,
+    text_brush: TextBrush<Layer>,
+    camera: ViewportCamera,
+}
+
+impl GameRenderer {
+    fn render(&mut self) -> DrawMetrics {
+        self.text_brush.draw(
+            &mut self.context,
+            self.renderer.glyph_texture(),
+            &mut self.batcher,
+        );
+
+        self.renderer.begin_render(&mut self.context, Color::BLACK);
+        self.renderer
+            .set_camera(&mut self.context, self.camera.transform());
+        self.renderer
+            .draw_batches(&mut self.context, self.batcher.batches());
+        self.batcher.clear();
+        self.renderer.end_render(&mut self.context)
     }
 }
 
 struct MyGame {
-    context: Context,
-    renderer: Renderer2D,
-    camera: ViewportCamera,
-    scene: Scene2D<Layer>,
-    text_brush: TextBrush<Layer>,
+    renderer: GameRenderer,
     gui_input: GuiInput,
-    gui: Gui<(), GuiPrimitive>,
+    gui: Gui<GuiPrimitive>,
     container: Container<GuiPrimitive>,
     label: WidgetRef<Label<GuiPrimitive>>,
     times_clicked: u32,
@@ -102,14 +126,16 @@ impl Game for MyGame {
         container.add_widget(Button::new("button", "button", "Click Me"));
         let label = container.add_widget(Label::new("label", ""));
         let mut gui = Gui::new();
-        gui.layout((), &container, camera.viewport());
+        gui.layout(&container, camera.viewport());
 
         MyGame {
-            context,
-            renderer,
-            camera,
-            scene: Scene2D::new(),
-            text_brush,
+            renderer: GameRenderer {
+                context,
+                renderer,
+                batcher: GuiBatcher::new(),
+                text_brush,
+                camera,
+            },
             gui_input: GuiInput::new(),
             gui,
             container,
@@ -131,25 +157,16 @@ impl Game for MyGame {
     }
 
     fn resize(&mut self, screen_size: Vec2) {
-        self.camera.screen_size = screen_size;
-        self.gui.layout((), &self.container, self.camera.viewport());
+        self.renderer.camera.screen_size = screen_size;
+        self.gui
+            .layout(&self.container, self.renderer.camera.viewport());
     }
 
     fn draw(&mut self) -> DrawMetrics {
-        for primitive in self.gui.draw(&()) {
-            primitive.draw(&mut self.scene, &mut self.text_brush);
+        for primitive in self.gui.draw() {
+            primitive.draw(&mut self.renderer.batcher, &mut self.renderer.text_brush);
         }
-        self.text_brush.draw(
-            &mut self.context,
-            self.renderer.glyph_texture(),
-            &mut self.scene,
-        );
-
-        self.renderer.begin_render(&mut self.context, Color::BLACK);
-        self.renderer
-            .set_camera(&mut self.context, self.camera.transform());
-        self.scene.draw(&mut self.context, &mut self.renderer, ..);
-        self.renderer.end_render(&mut self.context)
+        self.renderer.render()
     }
 }
 

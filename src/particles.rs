@@ -1,6 +1,6 @@
 use std::hash::Hash;
 
-use crate::Scene;
+use crate::Batcher;
 
 pub trait ParticleSolver {
     type Data;
@@ -12,18 +12,16 @@ pub trait ParticleSolver {
     fn draw(&self, data: &Self::Data, state: &Self::State) -> Self::DrawInstance;
 }
 
-pub struct ParticleSystem<S: ParticleSolver, L> {
+pub struct ParticleSystem<S: ParticleSolver> {
     particles: Vec<(S::Data, S::State)>,
     solver: S,
-    layer: L,
 }
 
-impl<S: ParticleSolver, L> ParticleSystem<S, L> {
-    pub fn new(solver: S, layer: L) -> Self {
+impl<S: ParticleSolver> ParticleSystem<S> {
+    pub fn new(solver: S) -> Self {
         ParticleSystem {
             particles: Vec::new(),
             solver,
-            layer,
         }
     }
     pub fn spawn(&mut self, data: S::Data, state: S::State) {
@@ -33,8 +31,15 @@ impl<S: ParticleSolver, L> ParticleSystem<S, L> {
         self.particles
             .retain_mut(|(data, state)| self.solver.update(data, state, dt));
     }
+    pub fn draw(&self, batcher: &mut Batcher<S::DrawParams, S::DrawInstance>) {
+        batcher.get_mut(self.solver.draw_params()).extend(
+            self.particles
+                .iter()
+                .map(|(data, state)| self.solver.draw(data, state)),
+        );
+    }
 }
-impl<S: ParticleSolver, L: Ord> ParticleSystem<S, L>
+impl<S: ParticleSolver> ParticleSystem<S>
 where
     S::Data: Clone,
     S::State: Clone,
@@ -42,19 +47,5 @@ where
     pub fn spawn_many(&mut self, data: S::Data, state: S::State, count: usize) {
         self.particles
             .resize(self.particles.len() + count, (data, state));
-    }
-}
-impl<S: ParticleSolver, L> ParticleSystem<S, L>
-where
-    L: Clone + Ord,
-{
-    pub fn queue_draw(&self, scene: &mut Scene<L, S::DrawParams, S::DrawInstance>) {
-        scene.queue_all(
-            self.layer.clone(),
-            self.solver.draw_params(),
-            self.particles
-                .iter()
-                .map(|(data, state)| self.solver.draw(data, state)),
-        );
     }
 }

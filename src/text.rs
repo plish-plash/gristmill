@@ -1,6 +1,5 @@
 use std::{
     borrow::Cow,
-    collections::HashMap,
     hash::{Hash, Hasher},
     io::Read,
     path::{Path, PathBuf},
@@ -16,7 +15,7 @@ use crate::{
     impl_sub_asset,
     scene2d::Instance,
     style::{style, style_or},
-    Scene, Size,
+    LayerBatcher, Size,
 };
 
 impl Asset for ab_glyph::FontArc {
@@ -69,8 +68,7 @@ impl Font {
 }
 
 #[derive(Clone)]
-pub struct Text<'a, L> {
-    pub layer: L,
+pub struct Text<'a> {
     pub position: Pos2,
     pub align: Align2,
     pub wrap: Option<f32>,
@@ -79,30 +77,13 @@ pub struct Text<'a, L> {
     pub text: Cow<'a, str>,
 }
 
-impl<'a, L> Text<'a, L> {
-    pub fn map_layer<L2, F>(self, f: F) -> Text<'a, L2>
-    where
-        F: FnOnce(L) -> L2,
-    {
-        Text {
-            layer: f(self.layer),
-            position: self.position,
-            align: self.align,
-            wrap: self.wrap,
-            font: self.font,
-            color: self.color,
-            text: self.text,
-        }
-    }
-}
-
 #[derive(Clone, PartialEq)]
-struct Extra<L> {
-    layer: L,
+struct Extra<T> {
+    layer: T,
     color: Color,
 }
 
-impl<L: Hash> Hash for Extra<L> {
+impl<T: Hash> Hash for Extra<T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.layer.hash(state);
         OrderedFloat(self.color.r).hash(state);
@@ -114,20 +95,20 @@ impl<L: Hash> Hash for Extra<L> {
 
 pub trait GlyphTexture {
     type Context;
-    type DrawParams: Clone + Eq + Hash;
+    type DrawParams: Eq + Hash;
     fn resize(&mut self, context: &mut Self::Context, size: Size);
     fn update(&mut self, context: &mut Self::Context, min: [u32; 2], max: [u32; 2], data: &[u8]);
     fn draw_params(&self) -> Self::DrawParams;
 }
 
-pub struct TextBrush<L> {
-    glyph_brush: GlyphBrush<(L, Instance), Extra<L>>,
-    vertices: HashMap<L, Vec<Instance>>,
+pub struct TextBrush<T> {
+    glyph_brush: GlyphBrush<(T, Instance), Extra<T>>,
+    vertices: Vec<(T, Instance)>,
 }
 
-impl<L> TextBrush<L>
+impl<T> TextBrush<T>
 where
-    L: Clone + Ord + PartialEq + Hash + 'static,
+    T: Clone + Ord + Hash + 'static,
 {
     pub fn new(fonts: Vec<FontAsset>) -> Self {
         let fonts = fonts.into_iter().map(|font| font.0).collect();
@@ -136,7 +117,7 @@ where
             .build();
         TextBrush {
             glyph_brush,
-            vertices: HashMap::new(),
+            vertices: Vec::new(),
         }
     }
     pub fn glyph_texture_size(&self) -> Size {
@@ -150,7 +131,7 @@ where
         }
         Rect::from_min_max(to_pos(rect.min), to_pos(rect.max))
     }
-    fn to_vertex(vertex: GlyphVertex<Extra<L>>) -> (L, Instance) {
+    fn to_vertex(vertex: GlyphVertex<Extra<T>>) -> (T, Instance) {
         let GlyphVertex {
             mut tex_coords,
             mut pixel_coords,
@@ -219,7 +200,7 @@ where
 
     pub fn text_bounds(
         &mut self,
-        layer: L,
+        layer: T,
         align: Align2,
         wrap: Option<f32>,
         font: Font,
@@ -246,7 +227,7 @@ where
             .map(Self::to_rect)
     }
 
-    pub fn queue(&mut self, text: &Text<L>) {
+    pub fn queue(&mut self, layer: T, text: &Text) {
         let position = text.position;
         let bounds_width = text.wrap.unwrap_or(f32::INFINITY);
         let layout = Self::make_layout(text.align, text.wrap.is_some());
@@ -255,7 +236,7 @@ where
             scale: text.font.scale.into(),
             font_id: text.font.font_id,
             extra: Extra {
-                layer: text.layer.clone(),
+                layer,
                 color: text.color,
             },
         };
@@ -268,11 +249,11 @@ where
         );
     }
 
-    pub fn draw<T: GlyphTexture>(
+    pub fn draw<G: GlyphTexture>(
         &mut self,
-        context: &mut T::Context,
-        glyph_texture: &mut T,
-        scene: &mut Scene<L, T::DrawParams, Instance>,
+        context: &mut G::Context,
+        glyph_texture: &mut G,
+        batcher: &mut LayerBatcher<T, G::DrawParams, Instance>,
     ) {
         let mut brush_action;
         loop {
@@ -300,18 +281,14 @@ where
         // If the text has changed from what was last drawn, store new vertices.
         match brush_action.unwrap() {
             BrushAction::Draw(vertices) => {
-                self.vertices.clear();
-                for (layer, instance) in vertices {
-                    self.vertices.entry(layer).or_default().push(instance);
-                }
+                self.vertices = vertices;
             }
             BrushAction::ReDraw => (),
         }
 
         // Draw the stored vertices.
-        let params = glyph_texture.draw_params();
-        for (layer, instances) in self.vertices.iter() {
-            scene.queue_all(layer.clone(), params.clone(), instances.iter().cloned());
+        for (layer, instance) in self.vertices.iter() {
+            batcher.add(layer.clone(), glyph_texture.draw_params(), instance.clone());
         }
     }
 }

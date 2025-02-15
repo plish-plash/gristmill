@@ -12,7 +12,6 @@ pub mod text;
 use std::{
     collections::{BTreeMap, HashMap},
     hash::Hash,
-    ops::RangeBounds,
 };
 
 pub use emath as math;
@@ -36,80 +35,121 @@ impl Size {
     }
 }
 
+pub struct Batch<Instance>(Vec<Instance>);
+
+impl<Instance> Batch<Instance> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+    pub fn add(&mut self, instance: Instance) {
+        self.0.push(instance);
+    }
+    pub fn append(&mut self, mut batch: Batch<Instance>) {
+        self.0.append(&mut batch.0);
+    }
+    pub fn as_slice(&self) -> &[Instance] {
+        self.0.as_slice()
+    }
+}
+impl<Instance> Default for Batch<Instance> {
+    fn default() -> Self {
+        Batch(Vec::new())
+    }
+}
+impl<Instance> Extend<Instance> for Batch<Instance> {
+    fn extend<T: IntoIterator<Item = Instance>>(&mut self, iter: T) {
+        self.0.extend(iter);
+    }
+}
+
+pub struct Batcher<Params, Instance>(HashMap<Params, Batch<Instance>>);
+
+impl<Params, Instance> Batcher<Params, Instance>
+where
+    Params: Eq + Hash,
+{
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn clear(&mut self) {
+        for batch in self.0.values_mut() {
+            batch.clear();
+        }
+    }
+    pub fn get_mut(&mut self, params: Params) -> &mut Batch<Instance> {
+        self.0.entry(params).or_default()
+    }
+    pub fn add(&mut self, params: Params, instance: Instance) {
+        self.get_mut(params).add(instance);
+    }
+    pub fn batches(&self) -> impl Iterator<Item = (&Params, &Batch<Instance>)> {
+        self.0.iter()
+    }
+}
+impl<Params, Instance> Default for Batcher<Params, Instance> {
+    fn default() -> Self {
+        Batcher(HashMap::new())
+    }
+}
+
+pub struct LayerBatcher<Layer, Params, Instance>(BTreeMap<Layer, Batcher<Params, Instance>>);
+
+impl<Layer, Params, Instance> LayerBatcher<Layer, Params, Instance>
+where
+    Layer: Ord,
+    Params: Eq + Hash,
+{
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn clear(&mut self) {
+        for batcher in self.0.values_mut() {
+            batcher.clear();
+        }
+    }
+    pub fn get_mut(&mut self, layer: Layer) -> &mut Batcher<Params, Instance> {
+        self.0.entry(layer).or_default()
+    }
+    pub fn add(&mut self, layer: Layer, params: Params, instance: Instance) {
+        self.get_mut(layer).add(params, instance);
+    }
+    pub fn batches(&self) -> impl Iterator<Item = (&Params, &Batch<Instance>)> {
+        self.0.values().flat_map(|batcher| batcher.batches())
+    }
+}
+impl<Layer, Params, Instance> Default for LayerBatcher<Layer, Params, Instance> {
+    fn default() -> Self {
+        LayerBatcher(BTreeMap::new())
+    }
+}
+
 pub trait Renderer {
     type Context;
-    type Params;
-    type Instance;
+    type Params: Eq + Hash + 'static;
+    type Instance: 'static;
     fn draw(
         &mut self,
         context: &mut Self::Context,
         params: &Self::Params,
         instances: &[Self::Instance],
     );
-}
-
-struct Batch<Instance>(Vec<Instance>);
-
-impl<Instance> Default for Batch<Instance> {
-    fn default() -> Self {
-        Batch(Vec::new())
+    fn draw_batch(
+        &mut self,
+        context: &mut Self::Context,
+        params: &Self::Params,
+        batch: &Batch<Self::Instance>,
+    ) {
+        self.draw(context, params, batch.as_slice())
     }
-}
-
-struct Layer<Params, Instance>(HashMap<Params, Batch<Instance>>);
-
-impl<Params, Instance> Default for Layer<Params, Instance> {
-    fn default() -> Self {
-        Layer(HashMap::new())
-    }
-}
-
-pub struct Scene<L, P, I>(BTreeMap<L, Layer<P, I>>);
-
-impl<L: Ord, P: Eq + Hash, I> Scene<L, P, I> {
-    pub fn new() -> Self {
-        Scene(BTreeMap::new())
-    }
-    fn get_batch(&mut self, layer: L, params: P) -> &mut Batch<I> {
-        let layer = self.0.entry(layer).or_default();
-        layer.0.entry(params).or_default()
-    }
-    pub fn queue(&mut self, layer: L, params: P, instance: I) {
-        self.get_batch(layer, params).0.push(instance);
-    }
-    pub fn queue_all<Iter>(&mut self, layer: L, params: P, instances: Iter)
+    fn draw_batches<'a, I>(&mut self, context: &mut Self::Context, batches: I)
     where
-        Iter: Iterator<Item = I>,
+        I: IntoIterator<Item = (&'a Self::Params, &'a Batch<Self::Instance>)>,
     {
-        self.get_batch(layer, params).0.extend(instances);
-    }
-    pub fn draw<R, B>(&mut self, context: &mut R::Context, renderer: &mut R, layers: B)
-    where
-        R: Renderer<Params = P, Instance = I>,
-        B: RangeBounds<L>,
-    {
-        for (layer, value) in self.0.iter_mut() {
-            if layers.contains(layer) {
-                for (params, batch) in value.0.iter_mut() {
-                    if !batch.0.is_empty() {
-                        renderer.draw(context, params, &batch.0);
-                        batch.0.clear();
-                    }
-                }
-            }
-        }
-    }
-    pub fn draw_layer<R>(&mut self, context: &mut R::Context, renderer: &mut R, layer: L)
-    where
-        R: Renderer<Params = P, Instance = I>,
-    {
-        if let Some(layer) = self.0.get_mut(&layer) {
-            for (params, batch) in layer.0.iter_mut() {
-                if !batch.0.is_empty() {
-                    renderer.draw(context, params, &batch.0);
-                    batch.0.clear();
-                }
-            }
+        for (params, batch) in batches {
+            self.draw_batch(context, params, batch);
         }
     }
 }

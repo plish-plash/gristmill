@@ -5,13 +5,12 @@ use gristmill::{
     math::{Pos2, Rect, Vec2},
     particles,
     scene2d::{Camera, Instance, UvRect},
-    DrawMetrics,
+    DrawMetrics, Renderer,
 };
 use gristmill_miniquad::{
-    Context, DrawParams, Game, InputEvent, Renderer2D, Scene2D, Texture, WindowConfig, WindowSetup,
+    Batcher2D, Context, DrawParams, Game, InputEvent, Renderer2D, Texture, WindowConfig,
+    WindowSetup,
 };
-
-type Layer = u32;
 
 struct GameAssets {
     particle: Texture,
@@ -63,13 +62,29 @@ impl particles::ParticleSolver for ParticleSolver {
     }
 }
 
-type ParticleSystem = particles::ParticleSystem<ParticleSolver, Layer>;
+type ParticleSystem = particles::ParticleSystem<ParticleSolver>;
 
-struct MyGame {
+struct GameRenderer {
     context: Context,
     renderer: Renderer2D,
+    batcher: Batcher2D,
     camera: Camera,
-    scene: Scene2D<Layer>,
+}
+
+impl GameRenderer {
+    fn render(&mut self) -> DrawMetrics {
+        self.renderer.begin_render(&mut self.context, Color::BLACK);
+        self.renderer
+            .set_camera(&mut self.context, self.camera.transform());
+        self.renderer
+            .draw_batches(&mut self.context, self.batcher.batches());
+        self.batcher.clear();
+        self.renderer.end_render(&mut self.context)
+    }
+}
+
+struct MyGame {
+    renderer: GameRenderer,
     particles: ParticleSystem,
     spawn_timer: f32,
 }
@@ -79,20 +94,19 @@ impl Game for MyGame {
         let assets = GameAssets::load(&mut context);
         let renderer = Renderer2D::new(&mut context, None);
         MyGame {
-            context,
-            renderer,
-            camera: Camera {
-                screen_size,
-                center: Pos2::ZERO,
-                scale: 1.0,
-            },
-            scene: Scene2D::new(),
-            particles: ParticleSystem::new(
-                ParticleSolver {
-                    texture: assets.particle,
+            renderer: GameRenderer {
+                context,
+                renderer,
+                batcher: Batcher2D::new(),
+                camera: Camera {
+                    screen_size,
+                    center: Pos2::ZERO,
+                    scale: 1.0,
                 },
-                0,
-            ),
+            },
+            particles: ParticleSystem::new(ParticleSolver {
+                texture: assets.particle,
+            }),
             spawn_timer: 0.0,
         }
     }
@@ -112,17 +126,12 @@ impl Game for MyGame {
     }
 
     fn resize(&mut self, screen_size: Vec2) {
-        self.camera.screen_size = screen_size;
+        self.renderer.camera.screen_size = screen_size;
     }
 
     fn draw(&mut self) -> DrawMetrics {
-        self.particles.queue_draw(&mut self.scene);
-
-        self.renderer.begin_render(&mut self.context, Color::BLACK);
-        self.renderer
-            .set_camera(&mut self.context, self.camera.transform());
-        self.scene.draw(&mut self.context, &mut self.renderer, ..);
-        self.renderer.end_render(&mut self.context)
+        self.particles.draw(&mut self.renderer.batcher);
+        self.renderer.render()
     }
 }
 
