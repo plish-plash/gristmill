@@ -15,7 +15,7 @@ use crate::{
     impl_sub_asset,
     scene2d::Instance,
     style::{style, style_or},
-    LayerBatcher, Size,
+    Size, Stage,
 };
 
 impl Asset for ab_glyph::FontArc {
@@ -95,7 +95,7 @@ impl<T: Hash> Hash for Extra<T> {
 
 pub trait GlyphTexture {
     type Context;
-    type DrawParams: Eq + Hash;
+    type DrawParams: Eq + PartialOrd;
     fn resize(&mut self, context: &mut Self::Context, size: Size);
     fn update(&mut self, context: &mut Self::Context, min: [u32; 2], max: [u32; 2], data: &[u8]);
     fn draw_params(&self) -> Self::DrawParams;
@@ -249,11 +249,11 @@ where
         );
     }
 
-    pub fn draw<G: GlyphTexture>(
+    pub fn draw<G: GlyphTexture, C>(
         &mut self,
         context: &mut G::Context,
         glyph_texture: &mut G,
-        batcher: &mut LayerBatcher<T, G::DrawParams, Instance>,
+        scene: &mut Stage<T, C, G::DrawParams, Instance>,
     ) {
         let mut brush_action;
         loop {
@@ -288,7 +288,7 @@ where
 
         // Draw the stored vertices.
         for (layer, instance) in self.vertices.iter() {
-            batcher.add(layer.clone(), glyph_texture.draw_params(), instance.clone());
+            scene.add(layer.clone(), glyph_texture.draw_params(), instance.clone());
         }
     }
 }

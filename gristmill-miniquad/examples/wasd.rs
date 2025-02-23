@@ -3,11 +3,11 @@ use std::path::Path;
 use gristmill::{
     color::Color,
     math::{Pos2, Rect, Vec2},
-    scene2d::{Camera, Instance, UvRect},
-    DrawMetrics, Renderer,
+    scene2d::{Instance, ScrollCamera, UvRect},
+    DrawMetrics,
 };
 use gristmill_miniquad::{
-    Batcher2D, Context, DrawParams, Game, InputEvent, KeyCode, Renderer2D, Sprite2D, Texture,
+    Context, DrawParams, Game, InputEvent, KeyCode, Renderer2D, Sprite2D, Stage2D, Texture,
     WindowConfig, WindowSetup,
 };
 
@@ -48,19 +48,15 @@ impl GameInput {
 struct GameRenderer {
     context: Context,
     renderer: Renderer2D,
-    batcher: Batcher2D,
-    camera: Camera,
+    stage: Stage2D<()>,
+    camera: ScrollCamera,
 }
 
 impl GameRenderer {
     fn render(&mut self) -> DrawMetrics {
-        self.renderer.begin_render(&mut self.context, Color::BLACK);
+        self.stage.set_camera((), self.camera.camera());
         self.renderer
-            .set_camera(&mut self.context, self.camera.transform());
-        self.renderer
-            .draw_batches(&mut self.context, self.batcher.batches());
-        self.batcher.clear();
-        self.renderer.end_render(&mut self.context)
+            .render(&mut self.context, &mut self.stage, Color::BLACK)
     }
 }
 
@@ -76,7 +72,7 @@ impl Game for MyGame {
         let assets = GameAssets::load(&mut context);
         let renderer = Renderer2D::new(&mut context, None);
         let player = Sprite2D {
-            params: DrawParams::texture(&assets.player),
+            params: DrawParams::from_texture(&assets.player, 0),
             instance: Instance {
                 rect: Rect::from_center_size(Pos2::ZERO, assets.player.size().to_vec2()),
                 uv: UvRect::default(),
@@ -89,8 +85,8 @@ impl Game for MyGame {
             renderer: GameRenderer {
                 context,
                 renderer,
-                batcher: Batcher2D::new(),
-                camera: Camera {
+                stage: Stage2D::new(),
+                camera: ScrollCamera {
                     screen_size,
                     center: Pos2::ZERO,
                     scale: 1.0,
@@ -127,7 +123,7 @@ impl Game for MyGame {
     }
 
     fn draw(&mut self) -> DrawMetrics {
-        self.player.draw(&mut self.renderer.batcher);
+        self.player.draw(&mut self.renderer.stage.get_layer(()));
         self.renderer.render()
     }
 }
@@ -135,7 +131,7 @@ impl Game for MyGame {
 fn main() {
     gristmill::asset::set_base_path("examples/assets").unwrap();
     gristmill_miniquad::start::<MyGame>(
-        WindowSetup::with_title("WASD Example".to_string()),
+        WindowSetup::from_title("WASD Example".to_string()),
         WindowConfig::default(),
     );
 }

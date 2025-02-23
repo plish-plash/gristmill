@@ -9,10 +9,7 @@ pub mod scene2d;
 pub mod style;
 pub mod text;
 
-use std::{
-    collections::{BTreeMap, HashMap},
-    hash::Hash,
-};
+use std::collections::BTreeMap;
 
 pub use emath as math;
 use emath::Vec2;
@@ -35,123 +32,114 @@ impl Size {
     }
 }
 
-pub struct Batch<Instance>(Vec<Instance>);
-
-impl<Instance> Batch<Instance> {
-    pub fn new() -> Self {
-        Self::default()
-    }
-    pub fn clear(&mut self) {
-        self.0.clear();
-    }
-    pub fn add(&mut self, instance: Instance) {
-        self.0.push(instance);
-    }
-    pub fn append(&mut self, mut batch: Batch<Instance>) {
-        self.0.append(&mut batch.0);
-    }
-    pub fn as_slice(&self) -> &[Instance] {
-        self.0.as_slice()
-    }
-}
-impl<Instance> Default for Batch<Instance> {
-    fn default() -> Self {
-        Batch(Vec::new())
-    }
-}
-impl<Instance> Extend<Instance> for Batch<Instance> {
-    fn extend<T: IntoIterator<Item = Instance>>(&mut self, iter: T) {
-        self.0.extend(iter);
-    }
-}
-
-pub struct Batcher<Params, Instance>(HashMap<Params, Batch<Instance>>);
+pub struct Batcher<Params, Instance>(Vec<(Params, Vec<Instance>)>);
 
 impl<Params, Instance> Batcher<Params, Instance>
 where
-    Params: Eq + Hash,
+    Params: Eq + PartialOrd,
 {
     pub fn new() -> Self {
         Self::default()
     }
     pub fn clear(&mut self) {
-        for batch in self.0.values_mut() {
+        for (_, batch) in self.0.iter_mut() {
             batch.clear();
         }
     }
-    pub fn get_mut(&mut self, params: Params) -> &mut Batch<Instance> {
-        self.0.entry(params).or_default()
+    fn get_batch(&mut self, params: Params) -> &mut Vec<Instance> {
+        for i in 0..self.0.len() {
+            let batch = &mut self.0[i];
+            if batch.0 == params {
+                return &mut self.0[i].1;
+            }
+            if batch.0 > params {
+                self.0.insert(i, (params, Vec::new()));
+                return &mut self.0[i].1;
+            }
+        }
+        self.0.push((params, Vec::new()));
+        let (_, batch) = self.0.last_mut().unwrap();
+        batch
     }
     pub fn add(&mut self, params: Params, instance: Instance) {
-        self.get_mut(params).add(instance);
+        self.get_batch(params).push(instance);
     }
-    pub fn batches(&self) -> impl Iterator<Item = (&Params, &Batch<Instance>)> {
-        self.0.iter()
+    pub fn batches(&self) -> impl Iterator<Item = &(Params, Vec<Instance>)> {
+        self.0.iter().filter(|(_, batch)| !batch.is_empty())
     }
 }
 impl<Params, Instance> Default for Batcher<Params, Instance> {
     fn default() -> Self {
-        Batcher(HashMap::new())
+        Batcher(Vec::new())
     }
 }
 
-pub struct LayerBatcher<Layer, Params, Instance>(BTreeMap<Layer, Batcher<Params, Instance>>);
+pub struct Stage<Layer, Camera, Params, Instance> {
+    layers: BTreeMap<Layer, Batcher<Params, Instance>>,
+    cameras: BTreeMap<Layer, Camera>,
+}
 
-impl<Layer, Params, Instance> LayerBatcher<Layer, Params, Instance>
+impl<Layer, Camera, Params, Instance> Stage<Layer, Camera, Params, Instance>
 where
     Layer: Ord,
-    Params: Eq + Hash,
+    Params: Eq + PartialOrd,
 {
     pub fn new() -> Self {
         Self::default()
     }
     pub fn clear(&mut self) {
-        for batcher in self.0.values_mut() {
+        for batcher in self.layers.values_mut() {
             batcher.clear();
         }
     }
-    pub fn get_mut(&mut self, layer: Layer) -> &mut Batcher<Params, Instance> {
-        self.0.entry(layer).or_default()
+    pub fn get_camera(&self, layer: &Layer) -> Option<&Camera> {
+        self.cameras.get(layer)
+    }
+    pub fn set_camera(&mut self, layer: Layer, camera: Camera) {
+        self.cameras.insert(layer, camera);
+    }
+    pub fn get_layer(&mut self, layer: Layer) -> &mut Batcher<Params, Instance> {
+        self.layers.entry(layer).or_default()
     }
     pub fn add(&mut self, layer: Layer, params: Params, instance: Instance) {
-        self.get_mut(layer).add(params, instance);
+        self.get_layer(layer).add(params, instance);
     }
-    pub fn batches(&self) -> impl Iterator<Item = (&Params, &Batch<Instance>)> {
-        self.0.values().flat_map(|batcher| batcher.batches())
+    pub fn draw<R>(&mut self, renderer: &mut R, context: &mut R::Context)
+    where
+        R: Renderer<Camera = Camera, Params = Params, Instance = Instance>,
+    {
+        for (layer, batcher) in self.layers.iter() {
+            if let Some(camera) = self.cameras.get(layer) {
+                renderer.set_camera(context, camera);
+            }
+            for (params, batch) in batcher.batches() {
+                renderer.draw(context, params, batch.as_slice());
+            }
+        }
+        self.clear();
     }
 }
-impl<Layer, Params, Instance> Default for LayerBatcher<Layer, Params, Instance> {
+impl<Layer, Camera, Params, Instance> Default for Stage<Layer, Camera, Params, Instance> {
     fn default() -> Self {
-        LayerBatcher(BTreeMap::new())
+        Stage {
+            layers: BTreeMap::new(),
+            cameras: BTreeMap::new(),
+        }
     }
 }
 
 pub trait Renderer {
     type Context;
-    type Params: Eq + Hash + 'static;
-    type Instance: 'static;
+    type Camera;
+    type Params: Eq + PartialOrd;
+    type Instance;
+    fn set_camera(&mut self, context: &mut Self::Context, camera: &Self::Camera);
     fn draw(
         &mut self,
         context: &mut Self::Context,
         params: &Self::Params,
         instances: &[Self::Instance],
     );
-    fn draw_batch(
-        &mut self,
-        context: &mut Self::Context,
-        params: &Self::Params,
-        batch: &Batch<Self::Instance>,
-    ) {
-        self.draw(context, params, batch.as_slice())
-    }
-    fn draw_batches<'a, I>(&mut self, context: &mut Self::Context, batches: I)
-    where
-        I: IntoIterator<Item = (&'a Self::Params, &'a Batch<Self::Instance>)>,
-    {
-        for (params, batch) in batches {
-            self.draw_batch(context, params, batch);
-        }
-    }
 }
 
 #[derive(Default, Clone)]

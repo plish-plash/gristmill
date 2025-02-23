@@ -4,12 +4,11 @@ use gristmill::{
     color::Color,
     math::{Pos2, Rect, Vec2},
     particles,
-    scene2d::{Camera, Instance, UvRect},
-    DrawMetrics, Renderer,
+    scene2d::{Instance, ScrollCamera, UvRect},
+    DrawMetrics,
 };
 use gristmill_miniquad::{
-    Batcher2D, Context, DrawParams, Game, InputEvent, Renderer2D, Texture, WindowConfig,
-    WindowSetup,
+    Context, DrawParams, Game, InputEvent, Renderer2D, Stage2D, Texture, WindowConfig, WindowSetup,
 };
 
 struct GameAssets {
@@ -51,7 +50,7 @@ impl particles::ParticleSolver for ParticleSolver {
         state.alive < data.lifetime
     }
     fn draw_params(&self) -> Self::DrawParams {
-        DrawParams::texture(&self.texture)
+        DrawParams::from_texture(&self.texture, 0)
     }
     fn draw(&self, data: &Self::Data, state: &Self::State) -> Self::DrawInstance {
         Instance {
@@ -67,19 +66,15 @@ type ParticleSystem = particles::ParticleSystem<ParticleSolver>;
 struct GameRenderer {
     context: Context,
     renderer: Renderer2D,
-    batcher: Batcher2D,
-    camera: Camera,
+    stage: Stage2D<()>,
+    camera: ScrollCamera,
 }
 
 impl GameRenderer {
     fn render(&mut self) -> DrawMetrics {
-        self.renderer.begin_render(&mut self.context, Color::BLACK);
+        self.stage.set_camera((), self.camera.camera());
         self.renderer
-            .set_camera(&mut self.context, self.camera.transform());
-        self.renderer
-            .draw_batches(&mut self.context, self.batcher.batches());
-        self.batcher.clear();
-        self.renderer.end_render(&mut self.context)
+            .render(&mut self.context, &mut self.stage, Color::BLACK)
     }
 }
 
@@ -97,8 +92,8 @@ impl Game for MyGame {
             renderer: GameRenderer {
                 context,
                 renderer,
-                batcher: Batcher2D::new(),
-                camera: Camera {
+                stage: Stage2D::new(),
+                camera: ScrollCamera {
                     screen_size,
                     center: Pos2::ZERO,
                     scale: 1.0,
@@ -130,7 +125,7 @@ impl Game for MyGame {
     }
 
     fn draw(&mut self) -> DrawMetrics {
-        self.particles.draw(&mut self.renderer.batcher);
+        self.particles.draw(&mut self.renderer.stage.get_layer(()));
         self.renderer.render()
     }
 }
@@ -138,7 +133,7 @@ impl Game for MyGame {
 fn main() {
     gristmill::asset::set_base_path("examples/assets").unwrap();
     gristmill_miniquad::start::<MyGame>(
-        WindowSetup::with_title("Particles Example".to_string()),
+        WindowSetup::from_title("Particles Example".to_string()),
         WindowConfig::default(),
     );
 }

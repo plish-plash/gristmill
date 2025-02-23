@@ -17,7 +17,7 @@ pub struct WindowSetup<'a> {
 }
 
 impl<'a> WindowSetup<'a> {
-    pub fn with_title(title: String) -> Self {
+    pub fn from_title(title: String) -> Self {
         WindowSetup {
             title,
             icon: None,
@@ -25,7 +25,7 @@ impl<'a> WindowSetup<'a> {
             config: Path::new("window.yaml"),
         }
     }
-    pub fn with_title_and_icon(title: String, icon: &'a Path) -> Self {
+    pub fn from_title_and_icon(title: String, icon: &'a Path) -> Self {
         WindowSetup {
             title,
             icon: Some(icon),

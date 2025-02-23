@@ -8,7 +8,7 @@ pub enum InputEvent<Key, MouseButton> {
     MouseButton { button: MouseButton, pressed: bool },
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Trigger {
     pressed: bool,
     just_pressed: bool,

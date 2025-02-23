@@ -14,6 +14,10 @@ use gristmill_miniquad::{
     Context, DrawParams, Game, InputEvent, MouseButton, Renderer2D, WindowConfig, WindowSetup,
 };
 
+const EXAMPLE_TEXT: &'static str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Etiam maximus ac turpis eget feugiat. Vivamus nibh sem, bibendum in neque vel, dictum lacinia mauris. Curabitur consequat et neque eu auctor. Aenean non nisi gravida, scelerisque odio in, rutrum elit. Donec vestibulum sem ultricies nisl lobortis accumsan. Nam ac posuere elit. Praesent nec leo non enim posuere sodales ut quis tortor. In vitae nisl convallis nisi rhoncus fringilla.
+
+Cras luctus sem neque, in semper magna blandit nec. Sed vel luctus neque. Phasellus et turpis dictum, aliquam mi sed, imperdiet odio. Vivamus et cursus dolor. Suspendisse ac ligula efficitur, rutrum felis in, eleifend massa. Proin semper vestibulum quam, vel pulvinar risus convallis non. Mauris sed felis massa.";
+
 type Layer = usize;
 
 struct GameAssets {
@@ -96,36 +100,43 @@ impl GuiRenderer {
 struct MyGame {
     renderer: GuiRenderer,
     gui: Gui<(), GuiPrimitive>,
-    label: WidgetRc<Label<GuiPrimitive>>,
-    times_clicked: u32,
 }
 
 impl MyGame {
     fn gui_event(&mut self, event: WidgetEvent) {
-        if event.name == "button" {
-            self.times_clicked += 1;
-            self.label
-                .borrow_mut()
-                .set_text(format!("Times clicked: {}", self.times_clicked));
-        }
+        let button_index: usize = *event.payload.unwrap().downcast().unwrap();
+        log::trace!("Clicked Button {}", button_index);
     }
 }
 
 impl Game for MyGame {
     fn init(mut context: Context, screen_size: Vec2) -> Self {
         let assets = GameAssets::load();
-        let text_brush = TextBrush::new(assets.fonts);
+        let mut text_brush = TextBrush::new(assets.fonts);
         let renderer = Renderer2D::new(&mut context, Some(text_brush.glyph_texture_size()));
         let viewport = Rect::from_min_size(Pos2::ZERO, screen_size);
 
-        let label;
         let mut gui = Gui::new();
         gui.layout_widget(
             (),
             &WidgetRc::new({
                 let mut container = Container::new(Direction::Horizontal, CrossAxis::Start, "root");
-                container.add_widget(Button::new("button", "button", "Click Me"));
-                label = container.add_widget(Label::new("label", ""));
+                container.add_widget(ScrollArea::new("scroll-area", Direction::Vertical, {
+                    let mut content = Label::new("scroll-content", EXAMPLE_TEXT);
+                    content.autosize(&mut text_brush, 0);
+                    content
+                }));
+                container.add_widget(ScrollArea::new("scroll-area", Direction::Vertical, {
+                    let mut content =
+                        Container::new(Direction::Vertical, CrossAxis::Stretch, "container");
+                    for index in 1_usize..=7 {
+                        let mut button =
+                            Button::new("button", "button", format!("Button {}", index));
+                        button.set_event_payload(index);
+                        content.add_widget(button);
+                    }
+                    content
+                }));
                 container
             }),
             viewport,
@@ -140,8 +151,6 @@ impl Game for MyGame {
                 viewport,
             },
             gui,
-            label,
-            times_clicked: 0,
         }
     }
 
@@ -169,7 +178,7 @@ impl Game for MyGame {
 fn main() {
     gristmill::asset::set_base_path("examples/assets").unwrap();
     gristmill_miniquad::start::<MyGame>(
-        WindowSetup::from_title("Button Example".to_string()),
+        WindowSetup::from_title("Scroll Example".to_string()),
         WindowConfig::default(),
     );
 }

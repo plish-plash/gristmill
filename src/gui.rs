@@ -1,4 +1,7 @@
-use std::{any::Any, borrow::Cow, cell::RefCell, hash::Hash, marker::PhantomData, rc::Rc};
+use std::{
+    any::Any, borrow::Cow, cell::RefCell, collections::BTreeMap, hash::Hash, marker::PhantomData,
+    ops::RangeInclusive, rc::Rc,
+};
 
 use emath::{pos2, vec2, Align2, Pos2, Rect, Vec2};
 use serde::{Deserialize, Serialize};
@@ -6,23 +9,39 @@ use serde::{Deserialize, Serialize};
 use crate::{
     color::Color,
     input::{InputEvent, Trigger},
+    scene2d::{Camera, Instance},
     style::{style, style_or},
     text::{Font, Text, TextBrush},
-    Batch,
 };
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum GuiLayer {
-    Background,
-    ContentBackground,
-    ContentForeground,
-    Foreground,
-    SuperForeground,
-}
-
-pub trait DrawPrimitive: 'static {
+pub trait Primitive: 'static {
+    type Layer: Clone + Ord;
+    type Params: Eq + PartialOrd;
+    fn layer(index: usize) -> Self::Layer;
     fn from_text(text: Text<'static>) -> Self;
     fn from_button(rect: Rect, state: ButtonState) -> Self;
+    fn draw(
+        self,
+        stage: &mut GuiStage<Self>,
+        text_brush: &mut TextBrush<Self::Layer>,
+        layer: Self::Layer,
+    );
+}
+
+pub type GuiStage<T> =
+    crate::Stage<<T as Primitive>::Layer, Camera, <T as Primitive>::Params, Instance>;
+
+pub struct GuiRenderer<'a, T: Primitive> {
+    stage: &'a mut GuiStage<T>,
+    text_brush: &'a mut TextBrush<T::Layer>,
+    layer: T::Layer,
+    layer_index: &'a mut usize,
+}
+
+impl<'a, T: Primitive> GuiRenderer<'a, T> {
+    pub fn draw(&mut self, primitive: T) {
+        primitive.draw(self.stage, self.text_brush, self.layer.clone());
+    }
 }
 
 #[derive(Default, Clone, Copy)]
@@ -32,7 +51,7 @@ pub struct LayoutInfo {
 }
 
 impl LayoutInfo {
-    pub fn with_size(size: Vec2) -> Self {
+    pub fn from_size(size: Vec2) -> Self {
         LayoutInfo { size, grow: false }
     }
     pub fn grow() -> Self {
@@ -50,11 +69,49 @@ impl LayoutInfo {
 }
 
 pub struct WidgetLayout<T> {
-    pub widget: WidgetHandle<T>,
+    pub widget: Wrc<T>,
     pub rect: Rect,
 }
 
-pub type WidgetLayouts<T> = Batch<WidgetLayout<T>>;
+impl<T> Clone for WidgetLayout<T> {
+    fn clone(&self) -> Self {
+        WidgetLayout {
+            widget: self.widget.clone(),
+            rect: self.rect.clone(),
+        }
+    }
+}
+
+pub struct WidgetLayouts<T>(Vec<WidgetLayout<T>>);
+
+impl<T: Primitive> WidgetLayouts<T> {
+    fn new() -> Self {
+        WidgetLayouts(Vec::new())
+    }
+    fn iter(&self) -> std::slice::Iter<WidgetLayout<T>> {
+        self.0.iter()
+    }
+    fn clear(&mut self) {
+        self.0.clear();
+    }
+    pub fn add(&mut self, widget: &Wrc<T>, rect: Rect) -> Vec2 {
+        self.0.push(WidgetLayout {
+            widget: widget.clone(),
+            rect,
+        });
+        widget.borrow_mut().layout_children(self, rect)
+    }
+    pub fn add_widget<W>(&mut self, widget: &WidgetRc<W>, rect: Rect) -> Vec2
+    where
+        W: Widget<Primitive = T>,
+    {
+        self.0.push(WidgetLayout {
+            widget: widget.0.clone(),
+            rect,
+        });
+        widget.borrow_mut().layout_children(self, rect)
+    }
+}
 
 pub enum GuiMouseButton {
     Primary,
@@ -95,8 +152,9 @@ impl GuiInputEvent {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct GuiInput {
+    pub grabbed: bool,
     pub pointer: Pos2,
     pub primary: Trigger,
     pub secondary: Trigger,
@@ -105,6 +163,14 @@ pub struct GuiInput {
 impl GuiInput {
     pub fn new() -> Self {
         GuiInput::default()
+    }
+    pub fn with_pointer_offset(&self, offset: Vec2) -> Self {
+        GuiInput {
+            grabbed: self.grabbed,
+            pointer: self.pointer - offset,
+            primary: self.primary.clone(),
+            secondary: self.secondary.clone(),
+        }
     }
     pub fn process(&mut self, event: GuiInputEvent) {
         match event {
@@ -115,7 +181,8 @@ impl GuiInput {
             },
         }
     }
-    fn update(&mut self) {
+    pub fn update(&mut self) {
+        self.grabbed = false;
         self.primary.update();
         self.secondary.update();
     }
@@ -129,32 +196,39 @@ pub struct WidgetEvent {
 pub enum WidgetInput {
     Pass,
     Block,
+    Grab,
     Event(WidgetEvent),
 }
 
 pub trait Widget: 'static {
-    type DrawPrimitive;
+    type Primitive: Primitive;
     fn layout_info(&self) -> LayoutInfo;
     #[allow(unused)]
-    fn layout_children(&self, layouts: &mut WidgetLayouts<Self::DrawPrimitive>, rect: Rect) {}
+    fn layout_children(
+        &mut self,
+        layouts: &mut WidgetLayouts<Self::Primitive>,
+        rect: Rect,
+    ) -> Vec2 {
+        self.layout_info().size
+    }
     fn reset_input(&mut self) {}
     #[allow(unused)]
     fn handle_input(&mut self, rect: Rect, input: &GuiInput) -> WidgetInput {
         WidgetInput::Pass
     }
-    fn draw(&self, batch: &mut Batch<Self::DrawPrimitive>, rect: Rect);
+    fn draw(&mut self, renderer: &mut GuiRenderer<Self::Primitive>, rect: Rect);
 }
 
-type WidgetHandle<T> = Rc<RefCell<dyn Widget<DrawPrimitive = T>>>;
+type Wrc<T> = Rc<RefCell<dyn Widget<Primitive = T>>>;
 
-pub struct WidgetRef<T: ?Sized>(Rc<RefCell<T>>);
+pub struct WidgetRc<T: ?Sized>(Rc<RefCell<T>>);
 
-impl<T: Widget> WidgetRef<T> {
+impl<T: Widget> WidgetRc<T> {
     pub fn new(widget: T) -> Self {
-        WidgetRef(Rc::new(RefCell::new(widget)))
+        WidgetRc(Rc::new(RefCell::new(widget)))
     }
 }
-impl<T: ?Sized> WidgetRef<T> {
+impl<T: ?Sized> WidgetRc<T> {
     pub fn borrow(&self) -> std::cell::Ref<T> {
         self.0.borrow()
     }
@@ -162,62 +236,223 @@ impl<T: ?Sized> WidgetRef<T> {
         self.0.borrow_mut()
     }
 }
-impl<T: ?Sized> Clone for WidgetRef<T> {
+impl<T: ?Sized> Clone for WidgetRc<T> {
     fn clone(&self) -> Self {
-        WidgetRef(self.0.clone())
+        WidgetRc(self.0.clone())
     }
 }
 
-pub struct Gui<Primitive> {
-    layouts: WidgetLayouts<Primitive>,
-    batch: Batch<Primitive>,
+pub struct GuiLayer<T> {
+    layouts: WidgetLayouts<T>,
+    grabbed_input: Option<WidgetLayout<T>>,
 }
 
-impl<Primitive: 'static> Gui<Primitive> {
+impl<T: Primitive> GuiLayer<T> {
     pub fn new() -> Self {
-        Gui {
-            layouts: WidgetLayouts::new(),
-            batch: Batch::new(),
-        }
+        GuiLayer::default()
+    }
+    pub fn is_input_grabbed(&self) -> bool {
+        self.grabbed_input.is_some()
     }
     pub fn clear(&mut self) {
         self.layouts.clear();
-        self.batch.clear();
+        self.grabbed_input = None;
     }
-    pub fn layout<W>(&mut self, root: &W, rect: Rect)
+    pub fn layout(&mut self, root: &Wrc<T>, rect: Rect) -> Vec2 {
+        self.clear();
+        self.layouts.add(root, rect)
+    }
+    pub fn layout_widget<W>(&mut self, root: &WidgetRc<W>, rect: Rect) -> Vec2
     where
-        W: Widget<DrawPrimitive = Primitive>,
+        W: Widget<Primitive = T>,
     {
         self.clear();
-        root.layout_children(&mut self.layouts, rect);
+        self.layouts.add_widget(root, rect)
     }
-    pub fn handle_input(&mut self, input: &mut GuiInput) -> Option<WidgetEvent> {
-        let mut widget_event = None;
-        let mut blocked = false;
-        for item in self.layouts.0.iter().rev() {
+    pub fn relayout(&mut self, rect: Rect) -> Vec2 {
+        if let Some(root) = self.layouts.0.first() {
+            let root = root.widget.clone();
+            self.layout(&root, rect)
+        } else {
+            Vec2::ZERO
+        }
+    }
+    pub fn reset_input(&mut self) {
+        self.grabbed_input = None;
+        for item in self.layouts.iter() {
             let mut widget = item.widget.borrow_mut();
-            if !blocked && item.rect.contains(input.pointer) {
-                match widget.handle_input(item.rect, input) {
-                    WidgetInput::Pass => {}
-                    WidgetInput::Block => blocked = true,
-                    WidgetInput::Event(event) => {
-                        blocked = true;
-                        widget_event = Some(event);
-                    }
-                }
+            widget.reset_input();
+        }
+    }
+    pub fn handle_input(&mut self, input: &GuiInput) -> WidgetInput {
+        if let Some(item) = self.grabbed_input.as_ref() {
+            let input = GuiInput {
+                grabbed: true,
+                ..input.clone()
+            };
+            let widget_input = item.widget.borrow_mut().handle_input(item.rect, &input);
+            if !matches!(widget_input, WidgetInput::Grab) {
+                self.grabbed_input = None;
+            }
+            if let WidgetInput::Event(event) = widget_input {
+                WidgetInput::Event(event)
             } else {
-                widget.reset_input();
+                WidgetInput::Grab
+            }
+        } else {
+            let mut blocked = false;
+            let mut widget_event = None;
+            for item in self.layouts.iter().rev() {
+                let mut widget = item.widget.borrow_mut();
+                if !blocked && item.rect.contains(input.pointer) {
+                    match widget.handle_input(item.rect, input) {
+                        WidgetInput::Pass => {}
+                        WidgetInput::Block => blocked = true,
+                        WidgetInput::Grab => {
+                            blocked = true;
+                            self.grabbed_input = Some(item.clone());
+                        }
+                        WidgetInput::Event(event) => {
+                            blocked = true;
+                            widget_event = Some(event);
+                        }
+                    }
+                } else {
+                    widget.reset_input();
+                }
+            }
+            if let Some(event) = widget_event {
+                WidgetInput::Event(event)
+            } else if blocked {
+                WidgetInput::Block
+            } else {
+                WidgetInput::Pass
             }
         }
-        input.update();
-        widget_event
     }
-    pub fn draw(&mut self) -> &[Primitive] {
-        self.batch.clear();
-        for item in self.layouts.as_slice() {
-            item.widget.borrow().draw(&mut self.batch, item.rect);
+    fn draw_items(&self, renderer: &mut GuiRenderer<T>) {
+        for item in self.layouts.iter() {
+            item.widget.borrow_mut().draw(renderer, item.rect);
         }
-        self.batch.as_slice()
+    }
+    pub fn draw(&self, stage: &mut GuiStage<T>, text_brush: &mut TextBrush<T::Layer>) {
+        let mut layer_index = 0;
+        let mut renderer = GuiRenderer {
+            stage,
+            text_brush,
+            layer: T::layer(layer_index),
+            layer_index: &mut layer_index,
+        };
+        self.draw_items(&mut renderer);
+    }
+    pub fn draw_scroll_area(&self, renderer: &mut GuiRenderer<T>, offset: Vec2, clip: Rect) {
+        *renderer.layer_index += 1;
+        let layer = T::layer(*renderer.layer_index);
+        if let Some(camera) = renderer.stage.get_camera(&renderer.layer) {
+            renderer
+                .stage
+                .set_camera(layer.clone(), camera.clone().with_scroll(offset, clip));
+        }
+        let mut scroll_renderer = GuiRenderer {
+            stage: renderer.stage,
+            text_brush: renderer.text_brush,
+            layer,
+            layer_index: renderer.layer_index,
+        };
+        self.draw_items(&mut scroll_renderer);
+    }
+}
+impl<T: Primitive> Default for GuiLayer<T> {
+    fn default() -> Self {
+        GuiLayer {
+            layouts: WidgetLayouts::new(),
+            grabbed_input: None,
+        }
+    }
+}
+
+pub struct Gui<L, T> {
+    layers: BTreeMap<L, GuiLayer<T>>,
+    input: GuiInput,
+}
+
+impl<L, T> Gui<L, T>
+where
+    L: Ord,
+    T: Primitive,
+{
+    pub fn new() -> Self {
+        Gui {
+            layers: BTreeMap::new(),
+            input: GuiInput::new(),
+        }
+    }
+    pub fn clear_layout(&mut self, layer: &L) {
+        if let Some(gui) = self.layers.get_mut(layer) {
+            gui.clear();
+        }
+    }
+    pub fn layout_widget<W>(&mut self, layer: L, root: &WidgetRc<W>, rect: Rect) -> Vec2
+    where
+        W: Widget<Primitive = T>,
+    {
+        self.layers
+            .entry(layer)
+            .or_default()
+            .layout_widget(root, rect)
+    }
+    pub fn relayout(&mut self, rect: Rect) {
+        for gui in self.layers.values_mut() {
+            gui.relayout(rect);
+        }
+    }
+    pub fn relayout_with<F>(&mut self, f: F)
+    where
+        F: Fn(&L) -> Rect,
+    {
+        for (layer, gui) in self.layers.iter_mut() {
+            gui.relayout(f(layer));
+        }
+    }
+    pub fn process_input(&mut self, event: Option<GuiInputEvent>) {
+        if let Some(event) = event {
+            self.input.process(event);
+        }
+    }
+    pub fn update_input(&mut self) -> WidgetInput {
+        let mut final_input = WidgetInput::Pass;
+        for gui in self.layers.values_mut().rev() {
+            let widget_input = gui.handle_input(&self.input);
+            if !matches!(widget_input, WidgetInput::Pass) {
+                final_input = widget_input;
+                break;
+            }
+        }
+        self.input.update();
+        final_input
+    }
+    pub fn draw(
+        &mut self,
+        stage: &mut GuiStage<T>,
+        text_brush: &mut TextBrush<T::Layer>,
+        viewport: Rect,
+    ) {
+        let mut layer_index = 0;
+        let mut renderer = GuiRenderer {
+            stage,
+            text_brush,
+            layer: T::layer(layer_index),
+            layer_index: &mut layer_index,
+        };
+        let camera = Camera::from_viewport(viewport);
+        for gui in self.layers.values_mut() {
+            renderer
+                .stage
+                .set_camera(T::Layer::clone(&renderer.layer), camera.clone());
+            gui.draw_items(&mut renderer);
+            *renderer.layer_index += 1;
+            renderer.layer = T::layer(*renderer.layer_index);
+        }
     }
 }
 
@@ -327,13 +562,13 @@ impl From<PaddingDe> for Padding {
 
 pub enum ContainerItem<T> {
     Empty(LayoutInfo),
-    Widget(WidgetHandle<T>),
+    Widget(Wrc<T>),
 }
 
-impl<T: 'static> ContainerItem<T> {
-    pub fn from_widget<W>(widget: &WidgetRef<W>) -> Self
+impl<T: Primitive> ContainerItem<T> {
+    pub fn from_widget<W>(widget: &WidgetRc<W>) -> Self
     where
-        W: Widget<DrawPrimitive = T>,
+        W: Widget<Primitive = T>,
     {
         ContainerItem::Widget(widget.0.clone())
     }
@@ -354,7 +589,7 @@ pub struct Container<T> {
     items: Vec<ContainerItem<T>>,
 }
 
-impl<T: 'static> Container<T> {
+impl<T: Primitive> Container<T> {
     pub fn new(direction: Direction, cross_axis: CrossAxis, class: &str) -> Self {
         Container {
             layout: LayoutInfo::from_style(class),
@@ -391,17 +626,17 @@ impl<T: 'static> Container<T> {
     pub fn add_empty(&mut self, empty: LayoutInfo) {
         self.add(ContainerItem::Empty(empty))
     }
-    pub fn add_widget<W>(&mut self, widget: W) -> WidgetRef<W>
+    pub fn add_widget<W>(&mut self, widget: W) -> WidgetRc<W>
     where
-        W: Widget<DrawPrimitive = T>,
+        W: Widget<Primitive = T>,
     {
-        let widget = WidgetRef::new(widget);
+        let widget = WidgetRc::new(widget);
         self.add(ContainerItem::from_widget(&widget));
         widget
     }
-    pub fn add_widget_ref<W>(&mut self, widget: &WidgetRef<W>)
+    pub fn add_widget_rc<W>(&mut self, widget: &WidgetRc<W>)
     where
-        W: Widget<DrawPrimitive = T>,
+        W: Widget<Primitive = T>,
     {
         self.add(ContainerItem::from_widget(widget));
     }
@@ -418,8 +653,8 @@ impl<T> Default for Container<T> {
         }
     }
 }
-impl<T: 'static> Widget for Container<T> {
-    type DrawPrimitive = T;
+impl<T: Primitive> Widget for Container<T> {
+    type Primitive = T;
     fn layout_info(&self) -> LayoutInfo {
         let layout_size = self.size + self.padding.min_size();
         LayoutInfo {
@@ -427,9 +662,9 @@ impl<T: 'static> Widget for Container<T> {
             grow: self.layout.grow,
         }
     }
-    fn layout_children(&self, layouts: &mut WidgetLayouts<T>, mut rect: Rect) {
+    fn layout_children(&mut self, layouts: &mut WidgetLayouts<T>, mut rect: Rect) -> Vec2 {
         if self.items.is_empty() {
-            return;
+            return Vec2::ZERO;
         }
         rect.min += vec2(self.padding.left, self.padding.top);
         rect.max -= vec2(self.padding.right, self.padding.bottom);
@@ -465,16 +700,20 @@ impl<T: 'static> Widget for Container<T> {
                     .direction
                     .rectangle(main_pos, cross_pos, item_main, item_cross);
                 widget_rect = widget_rect.translate(rect.min.to_vec2());
-                layouts.add(WidgetLayout {
-                    widget: widget.clone(),
-                    rect: widget_rect,
-                });
-                widget.borrow().layout_children(layouts, widget_rect);
+                layouts.add(widget, widget_rect);
             }
             main_pos += item_main + self.padding.between;
         }
+        match self.direction {
+            Direction::Horizontal => {
+                vec2(main_pos - self.padding.between, cross_size) + self.padding.min_size()
+            }
+            Direction::Vertical => {
+                vec2(cross_size, main_pos - self.padding.between) + self.padding.min_size()
+            }
+        }
     }
-    fn draw(&self, _batch: &mut Batch<T>, _rect: Rect) {}
+    fn draw(&mut self, _renderer: &mut GuiRenderer<T>, _rect: Rect) {}
 }
 
 pub struct GridContainer<T> {
@@ -484,7 +723,7 @@ pub struct GridContainer<T> {
     items: Vec<ContainerItem<T>>,
 }
 
-impl<T: 'static> GridContainer<T> {
+impl<T: Primitive> GridContainer<T> {
     pub fn new(class: &str) -> Self {
         GridContainer {
             layout: LayoutInfo::from_style(class),
@@ -504,17 +743,17 @@ impl<T: 'static> GridContainer<T> {
     pub fn add_empty(&mut self, empty: LayoutInfo) {
         self.add(ContainerItem::Empty(empty))
     }
-    pub fn add_widget<W>(&mut self, widget: W) -> WidgetRef<W>
+    pub fn add_widget<W>(&mut self, widget: W) -> WidgetRc<W>
     where
-        W: Widget<DrawPrimitive = T>,
+        W: Widget<Primitive = T>,
     {
-        let widget = WidgetRef::new(widget);
+        let widget = WidgetRc::new(widget);
         self.add(ContainerItem::from_widget(&widget));
         widget
     }
-    pub fn add_widget_ref<W>(&mut self, widget: &WidgetRef<W>)
+    pub fn add_widget_rc<W>(&mut self, widget: &WidgetRc<W>)
     where
-        W: Widget<DrawPrimitive = T>,
+        W: Widget<Primitive = T>,
     {
         self.add(ContainerItem::from_widget(widget));
     }
@@ -529,17 +768,14 @@ impl<T> Default for GridContainer<T> {
         }
     }
 }
-impl<T: 'static> Widget for GridContainer<T> {
-    type DrawPrimitive = T;
+impl<T: Primitive> Widget for GridContainer<T> {
+    type Primitive = T;
     fn layout_info(&self) -> LayoutInfo {
-        LayoutInfo {
-            size: self.layout.size,
-            grow: self.layout.grow,
-        }
+        self.layout
     }
-    fn layout_children(&self, layouts: &mut WidgetLayouts<T>, mut rect: Rect) {
+    fn layout_children(&mut self, layouts: &mut WidgetLayouts<T>, mut rect: Rect) -> Vec2 {
         if self.items.is_empty() {
-            return;
+            return Vec2::ZERO;
         }
         rect.min += vec2(self.padding.left, self.padding.top);
         rect.max -= vec2(self.padding.right, self.padding.bottom);
@@ -548,11 +784,7 @@ impl<T: 'static> Widget for GridContainer<T> {
             if let ContainerItem::Widget(widget) = item {
                 let widget_rect =
                     Rect::from_min_size(pos, self.item_size).translate(rect.min.to_vec2());
-                layouts.add(WidgetLayout {
-                    widget: widget.clone(),
-                    rect: widget_rect,
-                });
-                widget.borrow().layout_children(layouts, widget_rect);
+                layouts.add(widget, widget_rect);
             }
             pos.x += self.item_size.x + self.padding.between;
             if pos.x + self.item_size.x > rect.width() {
@@ -560,8 +792,14 @@ impl<T: 'static> Widget for GridContainer<T> {
                 pos.y += self.item_size.y + self.padding.between;
             }
         }
+        if pos.x > 0.0 {
+            pos.y += self.item_size.y;
+        } else {
+            pos.y -= self.padding.between;
+        }
+        vec2(rect.width(), pos.y) + self.padding.min_size()
     }
-    fn draw(&self, _batch: &mut Batch<T>, _rect: Rect) {}
+    fn draw(&mut self, _renderer: &mut GuiRenderer<T>, _rect: Rect) {}
 }
 
 pub struct Label<T> {
@@ -621,13 +859,13 @@ impl<T> Label<T> {
         }
     }
 }
-impl<T: DrawPrimitive> Widget for Label<T> {
-    type DrawPrimitive = T;
+impl<T: Primitive> Widget for Label<T> {
+    type Primitive = T;
     fn layout_info(&self) -> LayoutInfo {
         self.layout
     }
-    fn draw(&self, batch: &mut Batch<T>, rect: Rect) {
-        batch.add(T::from_text(Text {
+    fn draw(&mut self, renderer: &mut GuiRenderer<T>, rect: Rect) {
+        renderer.draw(T::from_text(Text {
             position: self.align.pos_in_rect(&rect),
             align: self.align,
             wrap: if self.wrap { Some(rect.width()) } else { None },
@@ -679,8 +917,8 @@ impl<T> Button<T> {
         self.event_payload = Some(Rc::new(payload));
     }
 }
-impl<T: DrawPrimitive> Widget for Button<T> {
-    type DrawPrimitive = T;
+impl<T: Primitive> Widget for Button<T> {
+    type Primitive = T;
     fn layout_info(&self) -> LayoutInfo {
         self.layout
     }
@@ -705,9 +943,9 @@ impl<T: DrawPrimitive> Widget for Button<T> {
         }
         WidgetInput::Block
     }
-    fn draw(&self, batch: &mut Batch<T>, rect: Rect) {
-        batch.add(T::from_button(rect, self.state));
-        batch.add(T::from_text(Text {
+    fn draw(&mut self, renderer: &mut GuiRenderer<T>, rect: Rect) {
+        renderer.draw(T::from_button(rect, self.state));
+        renderer.draw(T::from_text(Text {
             position: rect.center(),
             align: Align2::CENTER_CENTER,
             wrap: None,
@@ -715,5 +953,317 @@ impl<T: DrawPrimitive> Widget for Button<T> {
             color: Color::BLACK,
             text: self.label.text.clone(),
         }));
+    }
+}
+
+pub struct Slider<T> {
+    layout: LayoutInfo,
+    state: ButtonState,
+    direction: Direction,
+    handle_size: f32,
+    value: f32,
+    _marker: PhantomData<T>,
+}
+
+impl<T> Slider<T> {
+    pub fn new(class: &str, direction: Direction) -> Self {
+        Slider {
+            layout: LayoutInfo::from_style(class),
+            state: ButtonState::Normal,
+            direction,
+            handle_size: 0.0,
+            value: 0.0,
+            _marker: PhantomData,
+        }
+    }
+    fn handle_size(&self, rect: Rect) -> f32 {
+        match self.direction {
+            Direction::Horizontal => f32::max(rect.width() * self.handle_size, rect.height()),
+            Direction::Vertical => f32::max(rect.height() * self.handle_size, rect.width()),
+        }
+    }
+    fn handle_rect(&self, mut rect: Rect) -> Rect {
+        let handle_size = self.handle_size(rect);
+        match self.direction {
+            Direction::Horizontal => {
+                let track_size = rect.width() - handle_size;
+                rect.set_width(handle_size);
+                rect.translate(vec2(self.value * track_size, 0.0))
+            }
+            Direction::Vertical => {
+                let track_size = rect.height() - handle_size;
+                rect.set_height(handle_size);
+                rect.translate(vec2(0.0, self.value * track_size))
+            }
+        }
+    }
+    pub fn set_enabled(&mut self, enabled: bool) {
+        if enabled {
+            self.state = ButtonState::Normal;
+        } else {
+            self.state = ButtonState::Disable;
+        }
+    }
+}
+impl<T: Primitive> Widget for Slider<T> {
+    type Primitive = T;
+    fn layout_info(&self) -> LayoutInfo {
+        self.layout
+    }
+    fn reset_input(&mut self) {
+        if self.state != ButtonState::Disable {
+            self.state = ButtonState::Normal;
+        }
+    }
+    fn handle_input(&mut self, mut rect: Rect, input: &GuiInput) -> WidgetInput {
+        if self.state != ButtonState::Disable {
+            self.state = if input.primary.pressed() {
+                ButtonState::Press
+            } else {
+                ButtonState::Hover
+            };
+        }
+        if self.state == ButtonState::Press {
+            let handle_size = self.handle_size(rect);
+            match self.direction {
+                Direction::Horizontal => {
+                    rect = rect.shrink2(vec2(handle_size / 2.0, 0.0));
+                    self.value = emath::inverse_lerp(rect.min.x..=rect.max.x, input.pointer.x)
+                        .unwrap_or_default()
+                        .clamp(0.0, 1.0);
+                }
+                Direction::Vertical => {
+                    rect = rect.shrink2(vec2(0.0, handle_size / 2.0));
+                    self.value = emath::inverse_lerp(rect.min.y..=rect.max.y, input.pointer.y)
+                        .unwrap_or_default()
+                        .clamp(0.0, 1.0);
+                }
+            }
+            WidgetInput::Grab
+        } else {
+            WidgetInput::Block
+        }
+    }
+    fn draw(&mut self, renderer: &mut GuiRenderer<T>, rect: Rect) {
+        renderer.draw(T::from_button(self.handle_rect(rect), self.state));
+    }
+}
+
+pub struct ScrollArea<T> {
+    layout: LayoutInfo,
+    scrollbar: WidgetRc<Slider<T>>,
+    content: Wrc<T>,
+    content_layout: GuiLayer<T>,
+    content_size: Vec2,
+}
+
+impl<T: Primitive> ScrollArea<T> {
+    pub fn new<W>(class: &str, direction: Direction, content: W) -> Self
+    where
+        W: Widget<Primitive = T>,
+    {
+        let scrollbar = Slider::new("scrollbar", direction);
+        ScrollArea {
+            layout: LayoutInfo::from_style(class),
+            scrollbar: WidgetRc::new(scrollbar),
+            content: Rc::new(RefCell::new(content)),
+            content_layout: GuiLayer::new(),
+            content_size: Vec2::ZERO,
+        }
+    }
+    fn rects(&self, rect: Rect) -> (Rect, Rect) {
+        let scrollbar = self.scrollbar.borrow();
+        match scrollbar.direction {
+            Direction::Horizontal => {
+                rect.split_top_bottom_at_y(rect.bottom() - scrollbar.layout.size.y)
+            }
+            Direction::Vertical => {
+                rect.split_left_right_at_x(rect.right() - scrollbar.layout.size.x)
+            }
+        }
+    }
+    fn scroll(&self, rect: Rect) -> Vec2 {
+        let scrollbar = self.scrollbar.borrow();
+        match scrollbar.direction {
+            Direction::Horizontal => vec2(
+                (self.content_size.x - rect.width()).max(0.0) * -scrollbar.value,
+                0.0,
+            ),
+            Direction::Vertical => vec2(
+                0.0,
+                (self.content_size.y - rect.height()).max(0.0) * -scrollbar.value,
+            ),
+        }
+    }
+}
+impl<T: Primitive> Widget for ScrollArea<T> {
+    type Primitive = T;
+    fn layout_info(&self) -> LayoutInfo {
+        self.layout
+    }
+    fn layout_children(&mut self, layouts: &mut WidgetLayouts<T>, rect: Rect) -> Vec2 {
+        let (content_rect, scrollbar_rect) = self.rects(rect);
+        self.content_size = self.content_layout.layout(
+            &self.content,
+            Rect::from_min_size(Pos2::ZERO, content_rect.size()),
+        );
+        let mut scrollbar = self.scrollbar.borrow_mut();
+        match scrollbar.direction {
+            Direction::Horizontal => {
+                scrollbar.handle_size =
+                    (scrollbar_rect.width() / self.content_size.x).clamp(0.0, 1.0)
+            }
+            Direction::Vertical => {
+                scrollbar.handle_size =
+                    (scrollbar_rect.height() / self.content_size.y).clamp(0.0, 1.0)
+            }
+        }
+        std::mem::drop(scrollbar);
+        layouts.add_widget(&self.scrollbar, scrollbar_rect);
+        rect.size()
+    }
+    fn reset_input(&mut self) {
+        self.content_layout.reset_input();
+    }
+    fn handle_input(&mut self, rect: Rect, input: &GuiInput) -> WidgetInput {
+        let (content_rect, _) = self.rects(rect);
+        let offset = rect.min.to_vec2() + self.scroll(rect);
+        if content_rect.contains(input.pointer) || input.grabbed {
+            let mut input = input.with_pointer_offset(offset);
+            if let WidgetInput::Event(event) = self.content_layout.handle_input(&mut input) {
+                WidgetInput::Event(event)
+            } else if self.content_layout.is_input_grabbed() {
+                WidgetInput::Grab
+            } else {
+                WidgetInput::Block
+            }
+        } else {
+            WidgetInput::Pass
+        }
+    }
+    fn draw(&mut self, renderer: &mut GuiRenderer<T>, rect: Rect) {
+        let (content_rect, _) = self.rects(rect);
+        let offset = rect.min.to_vec2() + self.scroll(rect);
+        self.content_layout
+            .draw_scroll_area(renderer, offset, content_rect);
+    }
+}
+
+pub struct ScrollList<I, W, T> {
+    items: Vec<I>,
+    item_fn: Box<dyn Fn(&I) -> W>,
+    visible_items: RangeInclusive<usize>,
+    padding: Padding,
+    item_size: Vec2,
+    scroll_area: ScrollArea<T>,
+}
+
+impl<I, W, T> ScrollList<I, W, T>
+where
+    I: 'static,
+    W: Widget<Primitive = T>,
+    T: Primitive,
+{
+    pub fn new<F>(class: &str, items: Vec<I>, item_fn: F) -> Self
+    where
+        F: Fn(&I) -> W + 'static,
+    {
+        let padding: Padding = style(class, "padding");
+        let item_size = items
+            .first()
+            .map(|item| item_fn(item).layout_info().size)
+            .unwrap_or_default();
+        let content_size = padding.min_size()
+            + Vec2::new(
+                item_size.x,
+                (item_size.y * items.len() as f32)
+                    + (padding.between * items.len().saturating_sub(1) as f32),
+            );
+        let mut content = Container::default();
+        content.add_empty(LayoutInfo::from_size(content_size));
+        ScrollList {
+            items,
+            item_fn: Box::new(item_fn),
+            visible_items: 1..=0,
+            padding,
+            item_size,
+            scroll_area: ScrollArea::new(class, Direction::Vertical, content),
+        }
+    }
+    fn empty_items_size(&self, count: usize) -> Vec2 {
+        Vec2::new(
+            self.item_size.x,
+            (self.item_size.y * count as f32)
+                + (self.padding.between * count.saturating_sub(1) as f32),
+        )
+    }
+    fn visible_items(&self, rect: Rect) -> RangeInclusive<usize> {
+        let scroll = self.scroll_area.scroll(rect);
+        let item_height = self.item_size.y + self.padding.between;
+        let first = -scroll.y / item_height;
+        let last = (-scroll.y + rect.height()) / item_height;
+        let last_index = self.items.len().saturating_sub(1);
+        (first.floor() as usize).min(last_index)..=(last.floor() as usize).min(last_index)
+    }
+    fn build_content(&mut self, rect: Rect, layout: bool) {
+        let mut content = Container {
+            direction: Direction::Vertical,
+            padding: self.padding,
+            ..Default::default()
+        };
+        if *self.visible_items.start() > 0 {
+            content.add_empty(LayoutInfo::from_size(
+                self.empty_items_size(*self.visible_items.start()),
+            ));
+        }
+        for index in self.visible_items.clone() {
+            content.add_widget((self.item_fn)(&self.items[index]));
+        }
+        let last_index = self.items.len().saturating_sub(1);
+        if *self.visible_items.end() < last_index {
+            content.add_empty(LayoutInfo::from_size(
+                self.empty_items_size(last_index - *self.visible_items.end()),
+            ));
+        }
+        self.scroll_area.content = Rc::new(RefCell::new(content));
+        if layout {
+            let (content_rect, _) = self.scroll_area.rects(rect);
+            self.scroll_area.content_layout.layout(
+                &self.scroll_area.content,
+                Rect::from_min_size(Pos2::ZERO, content_rect.size()),
+            );
+        }
+    }
+}
+impl<I, W, T> Widget for ScrollList<I, W, T>
+where
+    I: 'static,
+    W: Widget<Primitive = T>,
+    T: Primitive,
+{
+    type Primitive = T;
+    fn layout_info(&self) -> LayoutInfo {
+        self.scroll_area.layout_info()
+    }
+    fn layout_children(&mut self, layouts: &mut WidgetLayouts<T>, rect: Rect) -> Vec2 {
+        if self.visible_items.is_empty() {
+            self.visible_items = self.visible_items(rect);
+            self.build_content(rect, false);
+        }
+        self.scroll_area.layout_children(layouts, rect)
+    }
+    fn reset_input(&mut self) {
+        self.scroll_area.reset_input();
+    }
+    fn handle_input(&mut self, rect: Rect, input: &GuiInput) -> WidgetInput {
+        self.scroll_area.handle_input(rect, input)
+    }
+    fn draw(&mut self, renderer: &mut GuiRenderer<T>, rect: Rect) {
+        let visible_items = self.visible_items(rect);
+        if visible_items != self.visible_items {
+            self.visible_items = visible_items;
+            self.build_content(rect, true);
+        }
+        self.scroll_area.draw(renderer, rect);
     }
 }

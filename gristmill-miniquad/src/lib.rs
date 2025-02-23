@@ -8,10 +8,9 @@ use std::{
 
 use gristmill::{
     color::Color,
-    gui::GuiLayer,
     logger,
-    math::{Pos2, Vec2},
-    scene2d::{CameraTransform, Instance},
+    math::{vec2, Pos2, Rect, Vec2},
+    scene2d::{Camera, Instance},
     DrawMetrics, Renderer, Size,
 };
 use miniquad::*;
@@ -24,6 +23,7 @@ pub use texture::*;
 pub use window::{WindowConfig, WindowSetup};
 
 mod shader {
+    use gristmill::math::Vec2;
     use miniquad::*;
 
     pub const VERTEX: &str = r#"#version 100
@@ -57,7 +57,8 @@ mod shader {
 
     #[repr(C)]
     pub struct Uniforms {
-        pub transform: gristmill::scene2d::CameraTransform,
+        pub translate: Vec2,
+        pub scale: Vec2,
     }
     pub fn meta() -> ShaderMeta {
         ShaderMeta {
@@ -149,24 +150,51 @@ impl gristmill::text::GlyphTexture for GlyphTexture {
         );
     }
     fn draw_params(&self) -> Self::DrawParams {
-        DrawParams(Some(self.0))
+        DrawParams {
+            texture: Some(self.0),
+            order: 0,
+        }
     }
 }
 
-#[derive(Default, Clone, PartialEq, Eq, Hash)]
-pub struct DrawParams(Option<TextureId>);
+#[derive(Clone, PartialEq, Eq)]
+pub struct DrawParams {
+    texture: Option<TextureId>,
+    order: i32,
+}
 
 impl DrawParams {
-    pub fn texture(texture: &Texture) -> Self {
-        DrawParams(Some(texture.id()))
+    pub fn new_fill(order: i32) -> Self {
+        DrawParams {
+            texture: None,
+            order,
+        }
     }
-    pub fn texture_asset(texture: &TextureAsset) -> Self {
-        DrawParams(Some(texture.id()))
+    pub fn from_texture(texture: &Texture, order: i32) -> Self {
+        DrawParams {
+            texture: Some(texture.id()),
+            order,
+        }
+    }
+    pub fn from_texture_asset(texture: &TextureAsset, order: i32) -> Self {
+        DrawParams {
+            texture: Some(texture.id()),
+            order,
+        }
+    }
+}
+impl PartialOrd for DrawParams {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        if self.order != other.order {
+            Some(self.order.cmp(&other.order))
+        } else {
+            None
+        }
     }
 }
 
 pub type Batcher2D = gristmill::Batcher<DrawParams, Instance>;
-pub type GuiBatcher = gristmill::LayerBatcher<GuiLayer, DrawParams, Instance>;
+pub type Stage2D<Layer> = gristmill::Stage<Layer, Camera, DrawParams, Instance>;
 pub type Sprite2D = gristmill::scene2d::sprite::Sprite<DrawParams>;
 
 pub struct Renderer2D {
@@ -246,7 +274,12 @@ impl Renderer2D {
         &mut self.glyph_texture
     }
 
-    pub fn begin_render(&mut self, context: &mut Context, background_color: Color) {
+    pub fn render<L: Ord>(
+        &mut self,
+        context: &mut Context,
+        scene: &mut Stage2D<L>,
+        background_color: Color,
+    ) -> DrawMetrics {
         context.begin_default_pass(PassAction::clear_color(
             background_color.r,
             background_color.g,
@@ -254,21 +287,34 @@ impl Renderer2D {
             background_color.a,
         ));
         context.apply_pipeline(&self.pipeline);
-    }
-    pub fn end_render(&mut self, context: &mut Context) -> DrawMetrics {
+        scene.draw(self, context);
         context.end_render_pass();
         context.commit_frame();
         self.draw_metrics.end_render()
-    }
-    pub fn set_camera(&mut self, context: &mut Context, transform: CameraTransform) {
-        context.apply_uniforms(UniformsSource::table(&shader::Uniforms { transform }));
     }
 }
 
 impl Renderer for Renderer2D {
     type Context = Context;
+    type Camera = Camera;
     type Params = DrawParams;
     type Instance = Instance;
+    fn set_camera(&mut self, context: &mut Context, camera: &Self::Camera) {
+        let (screen_width, screen_height) = window::screen_size();
+        let clip_rect = camera
+            .clip
+            .unwrap_or_else(|| Rect::from_min_size(Pos2::ZERO, vec2(screen_width, screen_height)));
+        context.apply_scissor_rect(
+            clip_rect.min.x as i32,
+            (screen_height - clip_rect.max.y) as i32,
+            clip_rect.width() as i32,
+            clip_rect.height() as i32,
+        );
+        context.apply_uniforms(UniformsSource::table(&shader::Uniforms {
+            translate: camera.translate,
+            scale: camera.scale * vec2(1.0, -1.0),
+        }));
+    }
     fn draw(
         &mut self,
         context: &mut Self::Context,
@@ -277,7 +323,7 @@ impl Renderer for Renderer2D {
     ) {
         self.instances.set_data(context, instances);
         self.bindings.vertex_buffers[1] = self.instances.buffer;
-        self.bindings.images[0] = params.0.unwrap_or(self.none_texture);
+        self.bindings.images[0] = params.texture.unwrap_or(self.none_texture);
         context.apply_bindings(&self.bindings);
         context.draw(0, 6, instances.len() as i32);
         self.draw_metrics.draw_call();
@@ -340,7 +386,7 @@ impl<G: Game> EventHandler for Stage<G> {
     // }
     fn resize_event(&mut self, width: f32, height: f32) {
         window::on_resize(width, height);
-        self.game.resize(Vec2::new(width, height));
+        self.game.resize(vec2(width, height));
     }
 
     fn mouse_motion_event(&mut self, x: f32, y: f32) {
@@ -350,7 +396,7 @@ impl<G: Game> EventHandler for Stage<G> {
     }
     fn raw_mouse_motion(&mut self, dx: f32, dy: f32) {
         self.game.input(InputEvent::RawMouseMotion {
-            delta: Vec2::new(dx, dy),
+            delta: vec2(dx, dy),
         });
     }
     fn mouse_wheel_event(&mut self, _x: f32, _y: f32) {

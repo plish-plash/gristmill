@@ -1,11 +1,9 @@
-use std::hash::Hash;
-
 use crate::Batcher;
 
 pub trait ParticleSolver {
     type Data;
     type State;
-    type DrawParams: Eq + Hash;
+    type DrawParams: Eq + PartialOrd;
     type DrawInstance;
     fn update(&self, data: &Self::Data, state: &mut Self::State, dt: f32) -> bool;
     fn draw_params(&self) -> Self::DrawParams;
@@ -32,7 +30,7 @@ impl<S: ParticleSolver> ParticleSystem<S> {
             .retain_mut(|(data, state)| self.solver.update(data, state, dt));
     }
     pub fn draw(&self, batcher: &mut Batcher<S::DrawParams, S::DrawInstance>) {
-        batcher.get_mut(self.solver.draw_params()).extend(
+        batcher.get_batch(self.solver.draw_params()).extend(
             self.particles
                 .iter()
                 .map(|(data, state)| self.solver.draw(data, state)),

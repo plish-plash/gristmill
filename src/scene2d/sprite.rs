@@ -1,4 +1,4 @@
-use std::{collections::HashMap, hash::Hash, path::Path};
+use std::{collections::HashMap, path::Path};
 
 use emath::{Align2, Pos2, Rect, Vec2};
 use serde::Deserialize;
@@ -16,7 +16,18 @@ pub struct Sprite<T> {
     pub instance: Instance,
 }
 
-impl<T: Eq + Hash + Clone> Sprite<T> {
+impl<T: Eq + PartialOrd + Clone> Sprite<T> {
+    pub fn translate(&mut self, translate: Vec2) {
+        self.instance.rect = self.instance.rect.translate(translate);
+    }
+    pub fn scale(&mut self, scale: f32) {
+        self.instance.rect = self.instance.rect.scale_from_center(scale);
+    }
+    pub fn with_position(&self, position: Pos2, align: Align2) -> Self {
+        let mut sprite = self.clone();
+        sprite.instance.rect = align.anchor_size(position, self.instance.rect.size());
+        sprite
+    }
     pub fn draw(&self, batcher: &mut Batcher<T, Instance>) {
         batcher.add(self.params.clone(), self.instance.clone())
     }
@@ -25,9 +36,9 @@ impl<T: Eq + Hash + Clone> Sprite<T> {
 pub struct ColorRect(pub Color, pub Rect);
 
 impl ColorRect {
-    pub fn draw<T: Eq + Hash + Default>(&self, batcher: &mut Batcher<T, Instance>) {
+    pub fn draw<T: Eq + PartialOrd>(&self, batcher: &mut Batcher<T, Instance>, params: T) {
         batcher.add(
-            T::default(),
+            params,
             Instance {
                 rect: self.1,
                 uv: UvRect::default(),

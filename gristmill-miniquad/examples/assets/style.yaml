@@ -1,6 +1,9 @@
 root:
   padding: { all: 16 }
 
+container:
+  padding: { between: 16 }
+
 button:
   size: { x: 128, y: 32 }
   font-id: 0
@@ -10,3 +13,16 @@ label:
   size: { x: 256, y: 32 }
   font-id: 0
   font-scale: 24
+
+scrollbar:
+  size: { x: 32, y: 32 }
+
+scroll-area:
+  size: { x: 288, y: 256 }
+
+scroll-content:
+  size: { x: 256, y: 32 }
+  font-id: 0
+  font-scale: 24
+  wrap: true
+  align: [Min, Min]
