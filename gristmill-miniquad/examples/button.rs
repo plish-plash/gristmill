@@ -120,14 +120,14 @@ impl Game for MyGame {
 
         let label;
         let mut gui = Gui::new();
-        gui.layout_widget(
+        gui.layout(
             (),
-            &WidgetRc::new({
+            {
                 let mut container = Container::new(Direction::Horizontal, CrossAxis::Start, "root");
-                container.add_widget(Button::new("button", "button", "Click Me"));
-                label = container.add_widget(Label::new("label", ""));
+                container.add(Button::new("button", "button", "Click Me"));
+                label = container.add(Label::new("label", ""));
                 container
-            }),
+            },
             viewport,
         );
 

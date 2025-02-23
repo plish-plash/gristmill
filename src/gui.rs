@@ -94,14 +94,14 @@ impl<T: Primitive> WidgetLayouts<T> {
     fn clear(&mut self) {
         self.0.clear();
     }
-    pub fn add(&mut self, widget: &Wrc<T>, rect: Rect) -> Vec2 {
+    pub fn add_dyn(&mut self, widget: &Wrc<T>, rect: Rect) -> Vec2 {
         self.0.push(WidgetLayout {
             widget: widget.clone(),
             rect,
         });
         widget.borrow_mut().layout_children(self, rect)
     }
-    pub fn add_widget<W>(&mut self, widget: &WidgetRc<W>, rect: Rect) -> Vec2
+    pub fn add<W>(&mut self, widget: &WidgetRc<W>, rect: Rect) -> Vec2
     where
         W: Widget<Primitive = T>,
     {
@@ -258,21 +258,21 @@ impl<T: Primitive> GuiLayer<T> {
         self.layouts.clear();
         self.grabbed_input = None;
     }
-    pub fn layout(&mut self, root: &Wrc<T>, rect: Rect) -> Vec2 {
+    fn layout_dyn(&mut self, root: &Wrc<T>, rect: Rect) -> Vec2 {
         self.clear();
-        self.layouts.add(root, rect)
+        self.layouts.add_dyn(root, rect)
     }
-    pub fn layout_widget<W>(&mut self, root: &WidgetRc<W>, rect: Rect) -> Vec2
+    pub fn layout_rc<W>(&mut self, root: &WidgetRc<W>, rect: Rect) -> Vec2
     where
         W: Widget<Primitive = T>,
     {
         self.clear();
-        self.layouts.add_widget(root, rect)
+        self.layouts.add(root, rect)
     }
     pub fn relayout(&mut self, rect: Rect) -> Vec2 {
         if let Some(root) = self.layouts.0.first() {
             let root = root.widget.clone();
-            self.layout(&root, rect)
+            self.layout_dyn(&root, rect)
         } else {
             Vec2::ZERO
         }
@@ -392,14 +392,17 @@ where
             gui.clear();
         }
     }
-    pub fn layout_widget<W>(&mut self, layer: L, root: &WidgetRc<W>, rect: Rect) -> Vec2
+    pub fn layout<W>(&mut self, layer: L, root: W, rect: Rect) -> Vec2
     where
         W: Widget<Primitive = T>,
     {
-        self.layers
-            .entry(layer)
-            .or_default()
-            .layout_widget(root, rect)
+        self.layout_rc(layer, &WidgetRc::new(root), rect)
+    }
+    pub fn layout_rc<W>(&mut self, layer: L, root: &WidgetRc<W>, rect: Rect) -> Vec2
+    where
+        W: Widget<Primitive = T>,
+    {
+        self.layers.entry(layer).or_default().layout_rc(root, rect)
     }
     pub fn relayout(&mut self, rect: Rect) {
         for gui in self.layers.values_mut() {
@@ -604,7 +607,7 @@ impl<T: Primitive> Container<T> {
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
-    fn add(&mut self, item: ContainerItem<T>) {
+    fn add_item(&mut self, item: ContainerItem<T>) {
         let between = if self.items.is_empty() {
             0.0
         } else {
@@ -624,21 +627,21 @@ impl<T: Primitive> Container<T> {
         self.items.push(item);
     }
     pub fn add_empty(&mut self, empty: LayoutInfo) {
-        self.add(ContainerItem::Empty(empty))
+        self.add_item(ContainerItem::Empty(empty))
     }
-    pub fn add_widget<W>(&mut self, widget: W) -> WidgetRc<W>
+    pub fn add<W>(&mut self, widget: W) -> WidgetRc<W>
     where
         W: Widget<Primitive = T>,
     {
         let widget = WidgetRc::new(widget);
-        self.add(ContainerItem::from_widget(&widget));
+        self.add_item(ContainerItem::from_widget(&widget));
         widget
     }
-    pub fn add_widget_rc<W>(&mut self, widget: &WidgetRc<W>)
+    pub fn add_rc<W>(&mut self, widget: &WidgetRc<W>)
     where
         W: Widget<Primitive = T>,
     {
-        self.add(ContainerItem::from_widget(widget));
+        self.add_item(ContainerItem::from_widget(widget));
     }
 }
 impl<T> Default for Container<T> {
@@ -700,7 +703,7 @@ impl<T: Primitive> Widget for Container<T> {
                     .direction
                     .rectangle(main_pos, cross_pos, item_main, item_cross);
                 widget_rect = widget_rect.translate(rect.min.to_vec2());
-                layouts.add(widget, widget_rect);
+                layouts.add_dyn(widget, widget_rect);
             }
             main_pos += item_main + self.padding.between;
         }
@@ -736,26 +739,26 @@ impl<T: Primitive> GridContainer<T> {
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
-    fn add(&mut self, item: ContainerItem<T>) {
+    fn add_item(&mut self, item: ContainerItem<T>) {
         self.item_size = self.item_size.max(item.layout_info().size);
         self.items.push(item);
     }
     pub fn add_empty(&mut self, empty: LayoutInfo) {
-        self.add(ContainerItem::Empty(empty))
+        self.add_item(ContainerItem::Empty(empty))
     }
-    pub fn add_widget<W>(&mut self, widget: W) -> WidgetRc<W>
+    pub fn add<W>(&mut self, widget: W) -> WidgetRc<W>
     where
         W: Widget<Primitive = T>,
     {
         let widget = WidgetRc::new(widget);
-        self.add(ContainerItem::from_widget(&widget));
+        self.add_item(ContainerItem::from_widget(&widget));
         widget
     }
-    pub fn add_widget_rc<W>(&mut self, widget: &WidgetRc<W>)
+    pub fn add_rc<W>(&mut self, widget: &WidgetRc<W>)
     where
         W: Widget<Primitive = T>,
     {
-        self.add(ContainerItem::from_widget(widget));
+        self.add_item(ContainerItem::from_widget(widget));
     }
 }
 impl<T> Default for GridContainer<T> {
@@ -784,7 +787,7 @@ impl<T: Primitive> Widget for GridContainer<T> {
             if let ContainerItem::Widget(widget) = item {
                 let widget_rect =
                     Rect::from_min_size(pos, self.item_size).translate(rect.min.to_vec2());
-                layouts.add(widget, widget_rect);
+                layouts.add_dyn(widget, widget_rect);
             }
             pos.x += self.item_size.x + self.padding.between;
             if pos.x + self.item_size.x > rect.width() {
@@ -1103,7 +1106,7 @@ impl<T: Primitive> Widget for ScrollArea<T> {
     }
     fn layout_children(&mut self, layouts: &mut WidgetLayouts<T>, rect: Rect) -> Vec2 {
         let (content_rect, scrollbar_rect) = self.rects(rect);
-        self.content_size = self.content_layout.layout(
+        self.content_size = self.content_layout.layout_dyn(
             &self.content,
             Rect::from_min_size(Pos2::ZERO, content_rect.size()),
         );
@@ -1119,7 +1122,7 @@ impl<T: Primitive> Widget for ScrollArea<T> {
             }
         }
         std::mem::drop(scrollbar);
-        layouts.add_widget(&self.scrollbar, scrollbar_rect);
+        layouts.add(&self.scrollbar, scrollbar_rect);
         rect.size()
     }
     fn reset_input(&mut self) {
@@ -1217,7 +1220,7 @@ where
             ));
         }
         for index in self.visible_items.clone() {
-            content.add_widget((self.item_fn)(&self.items[index]));
+            content.add((self.item_fn)(&self.items[index]));
         }
         let last_index = self.items.len().saturating_sub(1);
         if *self.visible_items.end() < last_index {
@@ -1228,7 +1231,7 @@ where
         self.scroll_area.content = Rc::new(RefCell::new(content));
         if layout {
             let (content_rect, _) = self.scroll_area.rects(rect);
-            self.scroll_area.content_layout.layout(
+            self.scroll_area.content_layout.layout_dyn(
                 &self.scroll_area.content,
                 Rect::from_min_size(Pos2::ZERO, content_rect.size()),
             );

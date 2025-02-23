@@ -117,28 +117,28 @@ impl Game for MyGame {
         let viewport = Rect::from_min_size(Pos2::ZERO, screen_size);
 
         let mut gui = Gui::new();
-        gui.layout_widget(
+        gui.layout(
             (),
-            &WidgetRc::new({
+            {
                 let mut container = Container::new(Direction::Horizontal, CrossAxis::Start, "root");
-                container.add_widget(ScrollArea::new("scroll-area", Direction::Vertical, {
+                container.add(ScrollArea::new("scroll-area", Direction::Vertical, {
                     let mut content = Label::new("scroll-content", EXAMPLE_TEXT);
                     content.autosize(&mut text_brush, 0);
                     content
                 }));
-                container.add_widget(ScrollArea::new("scroll-area", Direction::Vertical, {
+                container.add(ScrollArea::new("scroll-area", Direction::Vertical, {
                     let mut content =
                         Container::new(Direction::Vertical, CrossAxis::Stretch, "container");
                     for index in 1_usize..=7 {
                         let mut button =
                             Button::new("button", "button", format!("Button {}", index));
                         button.set_event_payload(index);
-                        content.add_widget(button);
+                        content.add(button);
                     }
                     content
                 }));
                 container
-            }),
+            },
             viewport,
         );
 
