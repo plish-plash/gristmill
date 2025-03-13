@@ -176,12 +176,6 @@ impl DrawParams {
             order,
         }
     }
-    pub fn from_texture_asset(texture: &TextureAsset, order: i32) -> Self {
-        DrawParams {
-            texture: Some(texture.id()),
-            order,
-        }
-    }
 }
 impl PartialOrd for DrawParams {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
@@ -277,7 +271,7 @@ impl Renderer2D {
     pub fn render<L: Ord>(
         &mut self,
         context: &mut Context,
-        scene: &mut Stage2D<L>,
+        stage: &mut Stage2D<L>,
         background_color: Color,
     ) -> DrawMetrics {
         context.begin_default_pass(PassAction::clear_color(
@@ -287,7 +281,7 @@ impl Renderer2D {
             background_color.a,
         ));
         context.apply_pipeline(&self.pipeline);
-        scene.draw(self, context);
+        stage.draw(self, context);
         context.end_render_pass();
         context.commit_frame();
         self.draw_metrics.end_render()

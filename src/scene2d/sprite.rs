@@ -10,6 +10,21 @@ use crate::{
     Batcher, Size,
 };
 
+pub struct ColorRect(pub Color, pub Rect);
+
+impl ColorRect {
+    pub fn draw<T: Eq + PartialOrd>(&self, batcher: &mut Batcher<T, Instance>, params: T) {
+        batcher.add(
+            params,
+            Instance {
+                rect: self.1,
+                uv: UvRect::default(),
+                color: self.0,
+            },
+        )
+    }
+}
+
 #[derive(Clone)]
 pub struct Sprite<T> {
     pub params: T,
@@ -33,18 +48,86 @@ impl<T: Eq + PartialOrd + Clone> Sprite<T> {
     }
 }
 
-pub struct ColorRect(pub Color, pub Rect);
+pub struct NinePatchSprite<T> {
+    pub params: T,
+    pub texture_size: Size,
+    pub texture_center: Rect,
+    pub rect: Rect,
+    pub color: Color,
+}
 
-impl ColorRect {
-    pub fn draw<T: Eq + PartialOrd>(&self, batcher: &mut Batcher<T, Instance>, params: T) {
-        batcher.add(
-            params,
-            Instance {
-                rect: self.1,
-                uv: UvRect::default(),
-                color: self.0,
-            },
-        )
+impl<T> NinePatchSprite<T> {
+    fn instance(&self, pos_min: Pos2, pos_max: Pos2, tex_min: Pos2, tex_max: Pos2) -> Instance {
+        Instance {
+            rect: Rect::from_min_max(pos_min, pos_max),
+            uv: UvRect::from_region(Rect::from_min_max(tex_min, tex_max), self.texture_size),
+            color: self.color,
+        }
+    }
+}
+impl<T: Eq + PartialOrd + Clone> NinePatchSprite<T> {
+    pub fn draw(&self, batcher: &mut Batcher<T, Instance>) {
+        let texture_size = self.texture_size.to_vec2();
+        let rect_center = Rect::from_min_max(
+            self.rect.min + self.texture_center.min.to_vec2(),
+            self.rect.max - (texture_size - self.texture_center.max.to_vec2()),
+        );
+        batcher.get_batch(self.params.clone()).extend([
+            self.instance(
+                self.rect.left_top(),
+                rect_center.left_top(),
+                Pos2::ZERO,
+                self.texture_center.left_top(),
+            ),
+            self.instance(
+                Pos2::new(rect_center.left(), self.rect.top()),
+                rect_center.right_top(),
+                Pos2::new(self.texture_center.left(), 0.0),
+                self.texture_center.right_top(),
+            ),
+            self.instance(
+                Pos2::new(rect_center.right(), self.rect.top()),
+                Pos2::new(self.rect.right(), rect_center.top()),
+                Pos2::new(self.texture_center.right(), 0.0),
+                Pos2::new(texture_size.x, self.texture_center.top()),
+            ),
+            self.instance(
+                Pos2::new(self.rect.left(), rect_center.top()),
+                rect_center.left_bottom(),
+                Pos2::new(0.0, self.texture_center.top()),
+                self.texture_center.left_bottom(),
+            ),
+            self.instance(
+                rect_center.left_top(),
+                rect_center.right_bottom(),
+                self.texture_center.left_top(),
+                self.texture_center.right_bottom(),
+            ),
+            self.instance(
+                rect_center.right_top(),
+                Pos2::new(self.rect.right(), rect_center.bottom()),
+                self.texture_center.right_top(),
+                Pos2::new(texture_size.x, self.texture_center.bottom()),
+            ),
+            self.instance(
+                Pos2::new(self.rect.left(), rect_center.bottom()),
+                Pos2::new(rect_center.left(), self.rect.bottom()),
+                Pos2::new(0.0, self.texture_center.bottom()),
+                Pos2::new(self.texture_center.left(), texture_size.y),
+            ),
+            self.instance(
+                rect_center.left_bottom(),
+                Pos2::new(rect_center.right(), self.rect.bottom()),
+                self.texture_center.left_bottom(),
+                Pos2::new(self.texture_center.right(), texture_size.y),
+            ),
+            self.instance(
+                rect_center.right_bottom(),
+                self.rect.right_bottom(),
+                self.texture_center.right_bottom(),
+                texture_size.to_pos2(),
+            ),
+        ]);
     }
 }
 
