@@ -18,7 +18,7 @@ use gristmill::{
 use miniquad::*;
 use serde::Deserialize;
 
-use crate::{Context, DrawParams, Sprite2D};
+use crate::{Context, Material, Sprite2D};
 
 static DESTROY_TEXTURES: Mutex<Vec<TextureId>> = Mutex::new(Vec::new());
 
@@ -84,16 +84,16 @@ impl Texture {
     pub fn load(context: &mut Context, path: &Path) -> Result<Self, AssetError> {
         Ok(Self::from_image(context, &Image::load(path)?))
     }
-    pub(crate) fn id(&self) -> TextureId {
-        self.0 .0
-    }
     pub fn size(&self) -> Size {
         self.0 .1
     }
-    pub fn sprite(&self, order: i32, position: Pos2, color: Color) -> Sprite2D {
-        let rect = Rect::from_min_size(position, self.size().to_vec2());
+    pub fn material(&self) -> Material {
+        Material(Some(self.0 .0))
+    }
+    pub fn sprite(&self, position: Pos2, color: Color) -> Sprite2D {
+        let rect = Rect::from_center_size(position, self.size().to_vec2());
         Sprite2D {
-            params: DrawParams::from_texture(&self, order),
+            material: self.material(),
             instance: Instance {
                 rect,
                 uv: UvRect::default(),
@@ -122,10 +122,13 @@ pub struct AtlasTexture<I: AtlasInfo> {
     _marker: PhantomData<I>,
 }
 impl<I: AtlasInfo> AtlasTexture<I> {
-    pub fn sprite(&self, frame: usize, order: i32, position: Pos2, color: Color) -> Sprite2D {
-        let rect = Rect::from_min_size(position, Vec2::splat(I::TILE_SIZE as f32));
+    pub fn material(&self) -> Material {
+        self.texture.material()
+    }
+    pub fn sprite(&self, frame: usize, position: Pos2, color: Color) -> Sprite2D {
+        let rect = Rect::from_center_size(position, Vec2::splat(I::TILE_SIZE as f32));
         Sprite2D {
-            params: DrawParams::from_texture(&self.texture, order),
+            material: self.material(),
             instance: Instance {
                 rect,
                 uv: self.frames[frame],
@@ -257,8 +260,29 @@ impl TextureLoader {
                         _marker: PhantomData,
                     }
                 } else {
-                    // copy TILE_SIZE chunks from the image
-                    todo!();
+                    if image.size.width < I::TILE_SIZE || image.size.height < I::TILE_SIZE {
+                        panic!("image too small for atlas");
+                    }
+                    let mut atlas_texture = None;
+                    let mut frames = Vec::new();
+                    let mut x = 0;
+                    while x + I::TILE_SIZE <= image.size.width {
+                        let subimage = image.subimage(x, 0, Size::new(I::TILE_SIZE, I::TILE_SIZE));
+                        let (texture, frame) = Self::add_to_atlas::<I>(
+                            &mut texture_loader.context,
+                            &mut texture_loader.atlases,
+                            &subimage,
+                        );
+                        atlas_texture = Some(texture);
+                        frames.push(frame);
+                        x += I::TILE_SIZE;
+                    }
+                    atlas_textures.insert(path, frames.clone());
+                    AtlasTexture {
+                        texture: atlas_texture.unwrap(),
+                        frames,
+                        _marker: PhantomData,
+                    }
                 }
             };
             Ok(texture)

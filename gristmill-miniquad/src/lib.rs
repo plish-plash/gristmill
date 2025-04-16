@@ -2,6 +2,7 @@ mod texture;
 pub mod window;
 
 use std::{
+    hash::Hash,
     path::Path,
     time::{Duration, Instant},
 };
@@ -9,9 +10,10 @@ use std::{
 use gristmill::{
     color::Color,
     logger,
-    math::{vec2, Pos2, Rect, Vec2},
-    scene2d::{Camera, Instance},
-    DrawMetrics, Renderer, Size,
+    math::{vec2, Pos2, Rect, TSTransform, Vec2},
+    scene2d::Instance,
+    text::{TextBrush, TextPipeline},
+    Buffer, DrawMetrics, Pipeline, Size,
 };
 use miniquad::*;
 
@@ -33,20 +35,20 @@ mod shader {
     attribute vec4 inst_uv;
     attribute vec4 inst_color;
 
-    varying mediump vec2 texcoord;
+    varying lowp vec2 texcoord;
     varying lowp vec4 color;
 
     uniform vec4 transform;
 
     void main() {
-        vec2 pos = mix(inst_rect.xy, inst_rect.zw, vert_pos);
-        gl_Position = vec4((pos + transform.xy) * transform.zw, 0.0, 1.0);
+        vec2 pos = (mix(inst_rect.xy, inst_rect.zw, vert_pos) + transform.xy) * transform.zw;
+        gl_Position = vec4((pos - vec2(1.0, 1.0)) * vec2(1.0, -1.0), 0.0, 1.0);
         texcoord = mix(inst_uv.xy, inst_uv.zw, vert_pos);
         color = inst_color;
     }"#;
 
     pub const FRAGMENT: &str = r#"#version 100
-    varying mediump vec2 texcoord;
+    varying lowp vec2 texcoord;
     varying lowp vec4 color;
 
     uniform sampler2D tex;
@@ -78,35 +80,58 @@ mod shader {
     }
 }
 
-struct InstanceBuffer {
-    buffer: BufferId,
-    size: usize,
+pub struct InstanceBuffer {
+    data: Vec<Instance>,
+    data_changed: bool,
+    buffer: Option<BufferId>,
+    capacity: usize,
 }
 
 impl InstanceBuffer {
-    const INITIAL_SIZE: usize = 64;
-    fn create_buffer(context: &mut Context, size: usize) -> BufferId {
-        context.new_buffer(
-            BufferType::VertexBuffer,
-            BufferUsage::Stream,
-            BufferSource::empty::<Instance>(size),
-        )
-    }
-    fn new(context: &mut Context) -> Self {
-        InstanceBuffer {
-            buffer: Self::create_buffer(context, Self::INITIAL_SIZE),
-            size: Self::INITIAL_SIZE,
+    const MINIMUM_SIZE: usize = 32;
+    fn sync(&mut self, context: &mut Context) {
+        if !self.data_changed {
+            return;
         }
-    }
-    fn set_data(&mut self, context: &mut Context, data: &[Instance]) {
-        if data.len() > self.size {
-            while data.len() > self.size {
-                self.size *= 2;
+        if self.data.len() > self.capacity {
+            self.capacity = self.data.len().next_power_of_two().max(Self::MINIMUM_SIZE);
+            if let Some(buffer) = self.buffer {
+                context.delete_buffer(buffer);
             }
-            context.delete_buffer(self.buffer);
-            self.buffer = Self::create_buffer(context, self.size);
+            self.buffer = Some(context.new_buffer(
+                BufferType::VertexBuffer,
+                BufferUsage::Stream,
+                BufferSource::empty::<Instance>(self.capacity),
+            ));
         }
-        context.buffer_update(self.buffer, BufferSource::slice(data));
+        if let Some(buffer) = self.buffer {
+            context.buffer_update(buffer, BufferSource::slice(&self.data));
+        }
+        self.data_changed = false;
+    }
+}
+impl Buffer<Instance> for InstanceBuffer {
+    fn new() -> Self {
+        InstanceBuffer {
+            data: Vec::new(),
+            data_changed: false,
+            buffer: None,
+            capacity: 0,
+        }
+    }
+    fn clear(&mut self) {
+        self.data.clear();
+        self.data_changed = true;
+    }
+    fn push(&mut self, value: Instance) {
+        self.data.push(value);
+        self.data_changed = true;
+    }
+}
+impl Extend<Instance> for InstanceBuffer {
+    fn extend<T: IntoIterator<Item = Instance>>(&mut self, iter: T) {
+        self.data.extend(iter);
+        self.data_changed = true;
     }
 }
 
@@ -128,15 +153,12 @@ impl GlyphTexture {
     }
 }
 
-impl gristmill::text::GlyphTexture for GlyphTexture {
-    type Context = Context;
-    type DrawParams = DrawParams;
-
-    fn resize(&mut self, context: &mut Self::Context, size: Size) {
+impl gristmill::text::GlyphTexture<Pipeline2D> for GlyphTexture {
+    fn resize(&mut self, context: &mut Context, size: Size) {
         context.delete_texture(self.0);
         *self = Self::new(context, size);
     }
-    fn update(&mut self, context: &mut Self::Context, min: [u32; 2], max: [u32; 2], data: &[u8]) {
+    fn update(&mut self, context: &mut Context, min: [u32; 2], max: [u32; 2], data: &[u8]) {
         let width = max[0] - min[0];
         let height = max[1] - min[1];
         let bytes: Vec<u8> = data.iter().flat_map(|x| [255, 255, 255, *x]).collect();
@@ -149,58 +171,29 @@ impl gristmill::text::GlyphTexture for GlyphTexture {
             &bytes,
         );
     }
-    fn draw_params(&self) -> Self::DrawParams {
-        DrawParams {
-            texture: Some(self.0),
-            order: 0,
-        }
+    fn material(&self) -> Material {
+        Material(Some(self.0))
     }
 }
 
-#[derive(Clone, PartialEq, Eq)]
-pub struct DrawParams {
-    texture: Option<TextureId>,
-    order: i32,
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Material(Option<TextureId>);
+
+impl Material {
+    pub const SOLID: Material = Material(None);
 }
 
-impl DrawParams {
-    pub fn new_fill(order: i32) -> Self {
-        DrawParams {
-            texture: None,
-            order,
-        }
-    }
-    pub fn from_texture(texture: &Texture, order: i32) -> Self {
-        DrawParams {
-            texture: Some(texture.id()),
-            order,
-        }
-    }
-}
-impl PartialOrd for DrawParams {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        if self.order != other.order {
-            Some(self.order.cmp(&other.order))
-        } else {
-            None
-        }
-    }
-}
-
-pub type Batcher2D = gristmill::Batcher<DrawParams, Instance>;
-pub type Stage2D<Layer> = gristmill::Stage<Layer, Camera, DrawParams, Instance>;
-pub type Sprite2D = gristmill::scene2d::sprite::Sprite<DrawParams>;
-
-pub struct Renderer2D {
-    pipeline: Pipeline,
-    instances: InstanceBuffer,
+pub struct Pipeline2D {
+    pipeline: miniquad::Pipeline,
     bindings: Bindings,
-    none_texture: TextureId,
+    solid_texture: TextureId,
     glyph_texture: GlyphTexture,
     draw_metrics: DrawMetrics,
+    last_camera: TSTransform,
+    last_clip: Option<Rect>,
 }
 
-impl Renderer2D {
+impl Pipeline2D {
     pub fn new(context: &mut Context, glyph_texture_size: Option<Size>) -> Self {
         let vertices: [(f32, f32); 4] = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
         let vertex_buffer = context.new_buffer(
@@ -214,7 +207,6 @@ impl Renderer2D {
             BufferUsage::Immutable,
             BufferSource::slice(&indices),
         );
-        let instances = InstanceBuffer::new(context);
 
         let shader = context
             .new_shader(
@@ -249,78 +241,149 @@ impl Renderer2D {
             .map(|size| GlyphTexture::new(context, size))
             .unwrap_or(GlyphTexture(none_texture));
         let bindings = Bindings {
-            vertex_buffers: vec![vertex_buffer, instances.buffer],
+            vertex_buffers: vec![vertex_buffer, vertex_buffer],
             index_buffer,
             images: vec![none_texture],
         };
 
-        Renderer2D {
+        Pipeline2D {
             pipeline,
-            instances,
             bindings,
-            none_texture,
+            solid_texture: none_texture,
             glyph_texture,
             draw_metrics: DrawMetrics::new(),
+            last_camera: TSTransform::IDENTITY,
+            last_clip: None,
         }
     }
 
-    pub fn glyph_texture(&mut self) -> &mut GlyphTexture {
-        &mut self.glyph_texture
+    pub fn bind(&mut self, context: &mut Context) {
+        context.apply_pipeline(&self.pipeline);
+        self.set_camera(context, &TSTransform::IDENTITY);
+        self.last_camera = TSTransform::IDENTITY;
+        self.last_clip = None;
     }
+    fn set_camera(&mut self, context: &mut Context, camera: &TSTransform) {
+        let (screen_width, screen_height) = window::screen_size();
+        context.apply_uniforms(UniformsSource::table(&shader::Uniforms {
+            translate: camera.translation / camera.scaling,
+            scale: Vec2::new(2.0 / screen_width, 2.0 / screen_height) * camera.scaling,
+        }));
+    }
+}
 
-    pub fn render<L: Ord>(
+impl Pipeline for Pipeline2D {
+    type Context = Context;
+    type Material = Material;
+    type Instance = Instance;
+    type InstanceBuffer = InstanceBuffer;
+    type Camera = TSTransform;
+    fn transform(camera: &TSTransform, mut instance: Instance) -> Instance {
+        instance.rect = *camera * instance.rect;
+        instance.rect = Rect {
+            min: instance.rect.min.round(),
+            max: instance.rect.max.round(),
+        };
+        instance
+    }
+    fn draw(
         &mut self,
         context: &mut Context,
-        stage: &mut Stage2D<L>,
-        background_color: Color,
-    ) -> DrawMetrics {
-        context.begin_default_pass(PassAction::clear_color(
+        camera: &TSTransform,
+        material: &Material,
+        instances: &mut InstanceBuffer,
+    ) {
+        if instances.data.is_empty() {
+            return;
+        }
+        if *camera != self.last_camera {
+            self.set_camera(context, camera);
+            self.last_camera = *camera;
+        }
+        instances.sync(context);
+        self.bindings.vertex_buffers[1] = instances.buffer.unwrap();
+        self.bindings.images[0] = material.0.unwrap_or(self.solid_texture);
+        context.apply_bindings(&self.bindings);
+        context.draw(0, 6, instances.data.len() as i32);
+        self.draw_metrics.draw_call();
+    }
+}
+impl TextPipeline for Pipeline2D {
+    #[allow(refining_impl_trait)]
+    fn glyph_texture(&mut self) -> &mut GlyphTexture {
+        &mut self.glyph_texture
+    }
+    fn set_clip(&mut self, context: &mut Self::Context, clip: Option<Rect>) {
+        if clip != self.last_clip {
+            self.last_clip = clip;
+            let (screen_width, screen_height) = window::screen_size();
+            let clip = clip.unwrap_or_else(|| {
+                Rect::from_min_size(Pos2::ZERO, vec2(screen_width, screen_height))
+            });
+            context.apply_scissor_rect(
+                clip.min.x as i32,
+                (screen_height - clip.max.y) as i32,
+                clip.width() as i32,
+                clip.height() as i32,
+            );
+        }
+    }
+}
+
+pub type Batcher2D<'a> = gristmill::Batcher<'a, Pipeline2D>;
+pub type Sprite2D = gristmill::scene2d::sprite::Sprite<Material>;
+
+pub struct Renderer2D {
+    context: Context,
+    pipeline: Pipeline2D,
+    instances: InstanceBuffer,
+}
+
+impl Renderer2D {
+    pub fn new(mut context: Context) -> Self {
+        let pipeline = Pipeline2D::new(&mut context, None);
+        Renderer2D {
+            context,
+            pipeline,
+            instances: InstanceBuffer::new(),
+        }
+    }
+    pub fn new_text<L>(mut context: Context, text_brush: &TextBrush<Pipeline2D, L>) -> Self
+    where
+        L: Clone + Eq + Hash + 'static,
+    {
+        let pipeline = Pipeline2D::new(&mut context, Some(text_brush.glyph_texture_size()));
+        Renderer2D {
+            context,
+            pipeline,
+            instances: InstanceBuffer::new(),
+        }
+    }
+    pub fn context(&mut self) -> &mut Context {
+        &mut self.context
+    }
+    pub fn begin_render(&mut self, background_color: Color) {
+        self.context.begin_default_pass(PassAction::clear_color(
             background_color.r,
             background_color.g,
             background_color.b,
             background_color.a,
         ));
-        context.apply_pipeline(&self.pipeline);
-        stage.draw(self, context);
-        context.end_render_pass();
-        context.commit_frame();
-        self.draw_metrics.end_render()
     }
-}
-
-impl Renderer for Renderer2D {
-    type Context = Context;
-    type Camera = Camera;
-    type Params = DrawParams;
-    type Instance = Instance;
-    fn set_camera(&mut self, context: &mut Context, camera: &Self::Camera) {
-        let (screen_width, screen_height) = window::screen_size();
-        let clip_rect = camera
-            .clip
-            .unwrap_or_else(|| Rect::from_min_size(Pos2::ZERO, vec2(screen_width, screen_height)));
-        context.apply_scissor_rect(
-            clip_rect.min.x as i32,
-            (screen_height - clip_rect.max.y) as i32,
-            clip_rect.width() as i32,
-            clip_rect.height() as i32,
-        );
-        context.apply_uniforms(UniformsSource::table(&shader::Uniforms {
-            translate: camera.translate,
-            scale: camera.scale * vec2(1.0, -1.0),
-        }));
+    pub fn end_render(&mut self) -> DrawMetrics {
+        self.context.end_render_pass();
+        self.context.commit_frame();
+        self.pipeline.draw_metrics.end_render()
     }
-    fn draw(
-        &mut self,
-        context: &mut Self::Context,
-        params: &Self::Params,
-        instances: &[Self::Instance],
-    ) {
-        self.instances.set_data(context, instances);
-        self.bindings.vertex_buffers[1] = self.instances.buffer;
-        self.bindings.images[0] = params.texture.unwrap_or(self.none_texture);
-        context.apply_bindings(&self.bindings);
-        context.draw(0, 6, instances.len() as i32);
-        self.draw_metrics.draw_call();
+    pub fn bind_pipeline(&mut self) -> Batcher2D {
+        self.pipeline.bind(&mut self.context);
+        Batcher2D::new(&mut self.pipeline, &mut self.context, &mut self.instances)
+    }
+    pub fn process_text<L>(&mut self, text_brush: &mut TextBrush<Pipeline2D, L>)
+    where
+        L: Clone + Eq + Hash + 'static,
+    {
+        text_brush.process(&mut self.pipeline, &mut self.context);
     }
 }
 

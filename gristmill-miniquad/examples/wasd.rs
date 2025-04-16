@@ -2,13 +2,12 @@ use std::path::Path;
 
 use gristmill::{
     color::Color,
-    math::{Pos2, Rect, Vec2},
-    scene2d::{Instance, ScrollCamera, UvRect},
+    math::{Pos2, Vec2},
+    scene2d::ScrollCamera,
     DrawMetrics,
 };
 use gristmill_miniquad::{
-    Context, DrawParams, Game, InputEvent, KeyCode, Renderer2D, Sprite2D, Stage2D, Texture,
-    WindowConfig, WindowSetup,
+    Context, InputEvent, KeyCode, Renderer2D, Sprite2D, Texture, WindowConfig, WindowSetup,
 };
 
 struct GameAssets {
@@ -45,54 +44,28 @@ impl GameInput {
     }
 }
 
-struct GameRenderer {
-    context: Context,
+struct Game {
     renderer: Renderer2D,
-    stage: Stage2D<()>,
     camera: ScrollCamera,
-}
-
-impl GameRenderer {
-    fn render(&mut self) -> DrawMetrics {
-        self.stage.set_camera((), self.camera.camera());
-        self.renderer
-            .render(&mut self.context, &mut self.stage, Color::BLACK)
-    }
-}
-
-struct MyGame {
-    _assets: GameAssets,
     input: GameInput,
-    renderer: GameRenderer,
     player: Sprite2D,
+    _assets: GameAssets,
 }
 
-impl Game for MyGame {
+impl gristmill_miniquad::Game for Game {
     fn init(mut context: Context, screen_size: Vec2) -> Self {
         let assets = GameAssets::load(&mut context);
-        let renderer = Renderer2D::new(&mut context, None);
-        let player = Sprite2D {
-            params: DrawParams::from_texture(&assets.player, 0),
-            instance: Instance {
-                rect: Rect::from_center_size(Pos2::ZERO, assets.player.size().to_vec2()),
-                uv: UvRect::default(),
-                color: Color::WHITE,
+        let player = assets.player.sprite(Pos2::ZERO, Color::WHITE);
+        Game {
+            renderer: Renderer2D::new(context),
+            camera: ScrollCamera {
+                screen_size,
+                center: Pos2::ZERO,
+                scale: 1.0,
             },
-        };
-        MyGame {
-            _assets: assets,
             input: GameInput::default(),
-            renderer: GameRenderer {
-                context,
-                renderer,
-                stage: Stage2D::new(),
-                camera: ScrollCamera {
-                    screen_size,
-                    center: Pos2::ZERO,
-                    scale: 1.0,
-                },
-            },
             player,
+            _assets: assets,
         }
     }
 
@@ -115,22 +88,26 @@ impl Game for MyGame {
         if self.input.right {
             movement.x += SPEED * dt;
         }
-        self.player.instance.rect = self.player.instance.rect.translate(movement);
+        self.player.translate(movement);
     }
 
     fn resize(&mut self, screen_size: Vec2) {
-        self.renderer.camera.screen_size = screen_size;
+        self.camera.screen_size = screen_size;
     }
 
     fn draw(&mut self) -> DrawMetrics {
-        self.player.draw(&mut self.renderer.stage.get_layer(()));
-        self.renderer.render()
+        self.renderer.begin_render(Color::BLACK);
+        let mut batcher = self.renderer.bind_pipeline();
+        batcher.set_camera(self.camera.transform());
+        self.player.draw(&mut batcher);
+        std::mem::drop(batcher);
+        self.renderer.end_render()
     }
 }
 
 fn main() {
     gristmill::asset::set_base_path("examples/assets").unwrap();
-    gristmill_miniquad::start::<MyGame>(
+    gristmill_miniquad::start::<Game>(
         WindowSetup::from_title("WASD Example".to_string()),
         WindowConfig::default(),
     );

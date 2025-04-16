@@ -209,6 +209,22 @@ pub struct Image {
     pub data: Vec<u8>,
 }
 
+impl Image {
+    pub fn subimage(&self, x: u32, y: u32, size: Size) -> Image {
+        let origin = (x + (y * size.width)) as usize * 4;
+        let src_stride = self.size.width as usize * 4;
+        let dst_stride = size.width as usize * 4;
+        let mut subimage = Image { size, data: vec![0; (size.width * size.height) as usize * 4] };
+        for row in 0..(size.height as usize) {
+            let src_index = origin + (row * src_stride);
+            let dst_index = row * dst_stride;
+            let src = &self.data[src_index..src_index+dst_stride];
+            let dst = &mut subimage.data[dst_index..dst_index+dst_stride];
+            dst.copy_from_slice(src);
+        }
+        subimage
+    }
+}
 impl Asset for Image {
     fn load(path: &Path) -> Result<Self> {
         use png::*;

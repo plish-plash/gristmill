@@ -5,16 +5,13 @@ use gristmill::{
     color::Color,
     gui::*,
     math::{Pos2, Rect, Vec2},
-    scene2d::sprite::ColorRect,
     style::StyleSheet,
-    text::{FontAsset, Text, TextBrush},
+    text::{FontAsset, TextBrush},
     DrawMetrics,
 };
 use gristmill_miniquad::{
-    Context, DrawParams, Game, InputEvent, MouseButton, Renderer2D, WindowConfig, WindowSetup,
+    Context, InputEvent, Material, MouseButton, Pipeline2D, Renderer2D, WindowConfig, WindowSetup,
 };
-
-type Layer = usize;
 
 struct GameAssets {
     fonts: Vec<FontAsset>,
@@ -39,68 +36,44 @@ fn gui_mouse_button(button: MouseButton) -> Option<GuiMouseButton> {
     }
 }
 
-enum GuiPrimitive {
-    ColorRect(ColorRect),
-    Text(Text<'static>),
+struct GuiRenderer;
+
+impl gristmill::gui::GuiRenderer for GuiRenderer {
+    type GuiLayer = ();
+    type TextLayer = usize;
+    type Pipeline = Pipeline2D;
+    fn text_layer(_layer: &(), sublayer: usize) -> usize {
+        sublayer
+    }
+    fn button_material(&self, _state: ButtonState) -> Material {
+        Material::SOLID
+    }
 }
 
-impl Primitive for GuiPrimitive {
-    type Layer = Layer;
-    type Params = DrawParams;
-    fn layer(index: usize) -> Layer {
-        index
-    }
-    fn from_text(text: Text<'static>) -> Self {
-        GuiPrimitive::Text(text)
-    }
-    fn from_button(rect: Rect, state: ButtonState) -> Self {
-        let color = match state {
-            ButtonState::Normal => Color::new_rgb(0.5, 0.5, 0.5),
-            ButtonState::Hover => Color::new_rgb(0.6, 0.6, 0.6),
-            ButtonState::Press => Color::new_rgb(0.4, 0.4, 0.4),
-            ButtonState::Disable => Color::new_rgba(0.5, 0.5, 0.5, 0.5),
-        };
-        GuiPrimitive::ColorRect(ColorRect(color, rect))
-    }
-    fn draw(self, stage: &mut GuiStage<Self>, text_brush: &mut TextBrush<Layer>, layer: Layer) {
-        match self {
-            GuiPrimitive::ColorRect(color_rect) => {
-                color_rect.draw(stage.get_layer(layer), DrawParams::new_fill(-1))
-            }
-            GuiPrimitive::Text(text) => text_brush.queue(layer, &text),
+struct GameRenderer {
+    renderer: Renderer2D,
+    text_brush: TextBrush<Pipeline2D, usize>,
+}
+
+impl GameRenderer {
+    fn new(context: Context, fonts: Vec<FontAsset>) -> Self {
+        let text_brush = TextBrush::new(fonts);
+        let renderer = Renderer2D::new_text(context, &text_brush);
+        GameRenderer {
+            renderer,
+            text_brush,
         }
     }
 }
 
-struct GuiRenderer {
-    context: Context,
-    renderer: Renderer2D,
-    stage: GuiStage<GuiPrimitive>,
-    text_brush: TextBrush<Layer>,
-    viewport: Rect,
-}
-
-impl GuiRenderer {
-    fn render(&mut self, gui: &mut Gui<(), GuiPrimitive>) -> DrawMetrics {
-        gui.draw(&mut self.stage, &mut self.text_brush, self.viewport);
-        self.text_brush.draw(
-            &mut self.context,
-            self.renderer.glyph_texture(),
-            &mut self.stage,
-        );
-        self.renderer
-            .render(&mut self.context, &mut self.stage, Color::BLACK)
-    }
-}
-
-struct MyGame {
-    renderer: GuiRenderer,
-    gui: Gui<(), GuiPrimitive>,
-    label: WidgetRc<Label<GuiPrimitive>>,
+struct Game {
+    renderer: GameRenderer,
+    gui: Gui<GuiRenderer>,
+    label: WidgetRc<Label<GuiRenderer>>,
     times_clicked: u32,
 }
 
-impl MyGame {
+impl Game {
     fn gui_event(&mut self, event: WidgetEvent) {
         if event.name == "button" {
             self.times_clicked += 1;
@@ -111,11 +84,10 @@ impl MyGame {
     }
 }
 
-impl Game for MyGame {
-    fn init(mut context: Context, screen_size: Vec2) -> Self {
+impl gristmill_miniquad::Game for Game {
+    fn init(context: Context, screen_size: Vec2) -> Self {
         let assets = GameAssets::load();
-        let text_brush = TextBrush::new(assets.fonts);
-        let renderer = Renderer2D::new(&mut context, Some(text_brush.glyph_texture_size()));
+        let renderer = GameRenderer::new(context, assets.fonts);
         let viewport = Rect::from_min_size(Pos2::ZERO, screen_size);
 
         let label;
@@ -131,14 +103,8 @@ impl Game for MyGame {
             viewport,
         );
 
-        MyGame {
-            renderer: GuiRenderer {
-                context,
-                renderer,
-                stage: GuiStage::<GuiPrimitive>::new(),
-                text_brush,
-                viewport,
-            },
+        Game {
+            renderer,
             gui,
             label,
             times_clicked: 0,
@@ -157,18 +123,28 @@ impl Game for MyGame {
     }
 
     fn resize(&mut self, screen_size: Vec2) {
-        self.renderer.viewport = Rect::from_min_size(Pos2::ZERO, screen_size);
-        self.gui.relayout(self.renderer.viewport);
+        self.gui
+            .relayout(Rect::from_min_size(Pos2::ZERO, screen_size));
     }
 
     fn draw(&mut self) -> DrawMetrics {
-        self.renderer.render(&mut self.gui)
+        self.gui
+            .draw_text(&GuiRenderer, &mut self.renderer.text_brush);
+        self.renderer
+            .renderer
+            .process_text(&mut self.renderer.text_brush);
+        self.renderer.renderer.begin_render(Color::BLACK);
+        let mut batcher = self.renderer.renderer.bind_pipeline();
+        self.gui
+            .draw(&GuiRenderer, &mut self.renderer.text_brush, &mut batcher);
+        std::mem::drop(batcher);
+        self.renderer.renderer.end_render()
     }
 }
 
 fn main() {
     gristmill::asset::set_base_path("examples/assets").unwrap();
-    gristmill_miniquad::start::<MyGame>(
+    gristmill_miniquad::start::<Game>(
         WindowSetup::from_title("Button Example".to_string()),
         WindowConfig::default(),
     );

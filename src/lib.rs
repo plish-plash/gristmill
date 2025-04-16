@@ -9,10 +9,8 @@ pub mod scene2d;
 pub mod style;
 pub mod text;
 
-use std::collections::BTreeMap;
-
 pub use emath as math;
-use emath::Vec2;
+use emath::{Rect, Vec2};
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 pub struct Size {
@@ -32,114 +30,93 @@ impl Size {
     }
 }
 
-pub struct Batcher<Params, Instance>(Vec<(Params, Vec<Instance>)>);
-
-impl<Params, Instance> Batcher<Params, Instance>
-where
-    Params: Eq + PartialOrd,
-{
-    pub fn new() -> Self {
-        Self::default()
-    }
-    pub fn clear(&mut self) {
-        for (_, batch) in self.0.iter_mut() {
-            batch.clear();
-        }
-    }
-    fn get_batch(&mut self, params: Params) -> &mut Vec<Instance> {
-        for i in 0..self.0.len() {
-            let batch = &mut self.0[i];
-            if batch.0 == params {
-                return &mut self.0[i].1;
-            }
-            if batch.0 > params {
-                self.0.insert(i, (params, Vec::new()));
-                return &mut self.0[i].1;
-            }
-        }
-        self.0.push((params, Vec::new()));
-        let (_, batch) = self.0.last_mut().unwrap();
-        batch
-    }
-    pub fn add(&mut self, params: Params, instance: Instance) {
-        self.get_batch(params).push(instance);
-    }
-    pub fn batches(&self) -> impl Iterator<Item = &(Params, Vec<Instance>)> {
-        self.0.iter().filter(|(_, batch)| !batch.is_empty())
-    }
-}
-impl<Params, Instance> Default for Batcher<Params, Instance> {
-    fn default() -> Self {
-        Batcher(Vec::new())
-    }
+pub trait Buffer<T>: Extend<T> {
+    fn new() -> Self;
+    fn clear(&mut self);
+    fn push(&mut self, value: T);
 }
 
-pub struct Stage<Layer, Camera, Params, Instance> {
-    layers: BTreeMap<Layer, Batcher<Params, Instance>>,
-    cameras: BTreeMap<Layer, Camera>,
-}
-
-impl<Layer, Camera, Params, Instance> Stage<Layer, Camera, Params, Instance>
-where
-    Layer: Ord,
-    Params: Eq + PartialOrd,
-{
-    pub fn new() -> Self {
-        Self::default()
-    }
-    pub fn clear(&mut self) {
-        for batcher in self.layers.values_mut() {
-            batcher.clear();
-        }
-    }
-    pub fn get_camera(&self, layer: &Layer) -> Option<&Camera> {
-        self.cameras.get(layer)
-    }
-    pub fn set_camera(&mut self, layer: Layer, camera: Camera) {
-        self.cameras.insert(layer, camera);
-    }
-    pub fn get_layer(&mut self, layer: Layer) -> &mut Batcher<Params, Instance> {
-        self.layers.entry(layer).or_default()
-    }
-    pub fn add(&mut self, layer: Layer, params: Params, instance: Instance) {
-        self.get_layer(layer).add(params, instance);
-    }
-    pub fn draw<R>(&mut self, renderer: &mut R, context: &mut R::Context)
-    where
-        R: Renderer<Camera = Camera, Params = Params, Instance = Instance>,
-    {
-        for (layer, batcher) in self.layers.iter() {
-            if let Some(camera) = self.cameras.get(layer) {
-                renderer.set_camera(context, camera);
-            }
-            for (params, batch) in batcher.batches() {
-                renderer.draw(context, params, batch.as_slice());
-            }
-        }
-        self.clear();
-    }
-}
-impl<Layer, Camera, Params, Instance> Default for Stage<Layer, Camera, Params, Instance> {
-    fn default() -> Self {
-        Stage {
-            layers: BTreeMap::new(),
-            cameras: BTreeMap::new(),
-        }
-    }
-}
-
-pub trait Renderer {
+pub trait Pipeline {
     type Context;
-    type Camera;
-    type Params: Eq + PartialOrd;
+    type Material: Clone + PartialEq;
     type Instance;
-    fn set_camera(&mut self, context: &mut Self::Context, camera: &Self::Camera);
+    type InstanceBuffer: Buffer<Self::Instance>;
+    type Camera: Default;
+    fn transform(camera: &Self::Camera, instance: Self::Instance) -> Self::Instance;
     fn draw(
         &mut self,
         context: &mut Self::Context,
-        params: &Self::Params,
-        instances: &[Self::Instance],
+        camera: &Self::Camera,
+        material: &Self::Material,
+        instances: &mut Self::InstanceBuffer,
     );
+}
+
+pub struct Batcher<'a, P: Pipeline> {
+    pipeline: &'a mut P,
+    context: &'a mut P::Context,
+    batch: &'a mut P::InstanceBuffer,
+    material: Option<P::Material>,
+    camera: P::Camera,
+}
+
+impl<'a, P: Pipeline> Batcher<'a, P> {
+    pub fn new(
+        pipeline: &'a mut P,
+        context: &'a mut P::Context,
+        instances: &'a mut P::InstanceBuffer,
+    ) -> Self {
+        Batcher {
+            pipeline,
+            context,
+            batch: instances,
+            material: None,
+            camera: P::Camera::default(),
+        }
+    }
+    pub fn set_camera(&mut self, camera: P::Camera) {
+        self.camera = camera;
+    }
+    pub fn flush(&mut self) {
+        if let Some(material) = self.material.as_ref() {
+            self.pipeline
+                .draw(self.context, &P::Camera::default(), material, self.batch);
+        }
+        self.batch.clear();
+    }
+    pub fn draw(&mut self, material: &P::Material, instance: P::Instance) {
+        if self.material.as_ref() != Some(material) {
+            self.flush();
+            self.material = Some(material.clone());
+        }
+        self.batch.push(P::transform(&self.camera, instance));
+    }
+    pub fn draw_all<I>(&mut self, material: &P::Material, instances: I)
+    where
+        I: IntoIterator<Item = P::Instance>,
+    {
+        if self.material.as_ref() != Some(material) {
+            self.flush();
+            self.material = Some(material.clone());
+        }
+        self.batch.extend(
+            instances
+                .into_iter()
+                .map(|instance| P::transform(&self.camera, instance)),
+        );
+    }
+}
+impl<'a, P: text::TextPipeline> Batcher<'a, P> {
+    pub fn set_camera_and_clip(&mut self, camera: P::Camera, clip: Option<Rect>) {
+        self.flush();
+        self.pipeline.set_clip(&mut self.context, clip);
+        self.set_camera(camera);
+    }
+}
+impl<'a, P: Pipeline> Drop for Batcher<'a, P> {
+    fn drop(&mut self) {
+        self.flush();
+    }
 }
 
 #[derive(Default, Clone)]

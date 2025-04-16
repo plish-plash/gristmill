@@ -1,48 +1,39 @@
 use std::{
     any::Any, borrow::Cow, cell::RefCell, collections::BTreeMap, hash::Hash, marker::PhantomData,
-    ops::RangeInclusive, rc::Rc,
+    rc::Rc,
 };
 
-use emath::{pos2, vec2, Align2, Pos2, Rect, Vec2};
+use emath::{pos2, vec2, Align2, Pos2, Rect, TSTransform, Vec2};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     color::Color,
     input::{InputEvent, Trigger},
-    scene2d::{Camera, Instance},
+    scene2d::sprite::ColorRect,
     style::{style, style_or},
-    text::{Font, Text, TextBrush},
+    text::{Font, Text, TextBrush, TextPipeline},
+    Batcher, Pipeline,
 };
 
-pub trait Primitive: 'static {
-    type Layer: Clone + Ord;
-    type Params: Eq + PartialOrd;
-    fn layer(index: usize) -> Self::Layer;
-    fn from_text(text: Text<'static>) -> Self;
-    fn from_button(rect: Rect, state: ButtonState) -> Self;
-    fn draw(
-        self,
-        stage: &mut GuiStage<Self>,
-        text_brush: &mut TextBrush<Self::Layer>,
-        layer: Self::Layer,
-    );
-}
-
-pub type GuiStage<T> =
-    crate::Stage<<T as Primitive>::Layer, Camera, <T as Primitive>::Params, Instance>;
-
-pub struct GuiRenderer<'a, T: Primitive> {
-    stage: &'a mut GuiStage<T>,
-    text_brush: &'a mut TextBrush<T::Layer>,
-    layer: T::Layer,
-    layer_index: &'a mut usize,
-}
-
-impl<'a, T: Primitive> GuiRenderer<'a, T> {
-    pub fn draw(&mut self, primitive: T) {
-        primitive.draw(self.stage, self.text_brush, self.layer.clone());
+pub trait GuiRenderer: 'static {
+    type GuiLayer: Ord;
+    type TextLayer: Eq + Hash + Clone;
+    type Pipeline: TextPipeline;
+    fn text_layer(layer: &Self::GuiLayer, sublayer: usize) -> Self::TextLayer;
+    fn button_material(&self, state: ButtonState) -> <Self::Pipeline as Pipeline>::Material;
+    fn button_color(&self, state: ButtonState) -> Color {
+        match state {
+            ButtonState::Normal => Color::new_rgb(0.5, 0.5, 0.5),
+            ButtonState::Hover => Color::new_rgb(0.6, 0.6, 0.6),
+            ButtonState::Press => Color::new_rgb(0.4, 0.4, 0.4),
+            ButtonState::Disable => Color::new_rgba(0.5, 0.5, 0.5, 0.5),
+        }
     }
 }
+
+pub type GuiTextBrush<Renderer> =
+    TextBrush<<Renderer as GuiRenderer>::Pipeline, <Renderer as GuiRenderer>::TextLayer>;
+pub type GuiBatcher<'a, Renderer> = Batcher<'a, <Renderer as GuiRenderer>::Pipeline>;
 
 #[derive(Default, Clone, Copy)]
 pub struct LayoutInfo {
@@ -60,20 +51,20 @@ impl LayoutInfo {
             grow: true,
         }
     }
-    pub fn from_style(class: &str) -> Self {
+    pub fn from_style(class: &str, default_size: Vec2) -> Self {
         LayoutInfo {
-            size: style(class, "size"),
+            size: style_or(class, "size", default_size),
             grow: style(class, "grow"),
         }
     }
 }
 
-pub struct WidgetLayout<T> {
-    pub widget: Wrc<T>,
+pub struct WidgetLayout<Renderer> {
+    pub widget: Wrc<Renderer>,
     pub rect: Rect,
 }
 
-impl<T> Clone for WidgetLayout<T> {
+impl<Renderer> Clone for WidgetLayout<Renderer> {
     fn clone(&self) -> Self {
         WidgetLayout {
             widget: self.widget.clone(),
@@ -82,34 +73,47 @@ impl<T> Clone for WidgetLayout<T> {
     }
 }
 
-pub struct WidgetLayouts<T>(Vec<WidgetLayout<T>>);
+pub struct WidgetLayouts<Renderer> {
+    layouts: Vec<WidgetLayout<Renderer>>,
+    sublayers: Vec<WidgetLayout<Renderer>>,
+}
 
-impl<T: Primitive> WidgetLayouts<T> {
+impl<Renderer: GuiRenderer> WidgetLayouts<Renderer> {
     fn new() -> Self {
-        WidgetLayouts(Vec::new())
-    }
-    fn iter(&self) -> std::slice::Iter<WidgetLayout<T>> {
-        self.0.iter()
+        WidgetLayouts {
+            layouts: Vec::new(),
+            sublayers: Vec::new(),
+        }
     }
     fn clear(&mut self) {
-        self.0.clear();
+        self.layouts.clear();
+        self.sublayers.clear();
     }
-    pub fn add_dyn(&mut self, widget: &Wrc<T>, rect: Rect) -> Vec2 {
-        self.0.push(WidgetLayout {
+    fn root(&self) -> Option<Wrc<Renderer>> {
+        self.layouts.first().map(|layout| layout.widget.clone())
+    }
+    fn iter(&self) -> std::slice::Iter<WidgetLayout<Renderer>> {
+        self.layouts.iter()
+    }
+    pub fn add_dyn(&mut self, widget: &Wrc<Renderer>, rect: Rect) -> Vec2 {
+        self.layouts.push(WidgetLayout {
             widget: widget.clone(),
             rect,
         });
+        if widget.borrow().sublayer(rect).is_some() {
+            self.sublayers.push(WidgetLayout {
+                widget: widget.clone(),
+                rect,
+            });
+        }
         widget.borrow_mut().layout_children(self, rect)
     }
     pub fn add<W>(&mut self, widget: &WidgetRc<W>, rect: Rect) -> Vec2
     where
-        W: Widget<Primitive = T>,
+        W: Widget<Renderer = Renderer>,
     {
-        self.0.push(WidgetLayout {
-            widget: widget.0.clone(),
-            rect,
-        });
-        widget.borrow_mut().layout_children(self, rect)
+        let widget: Wrc<Renderer> = widget.0.clone();
+        self.add_dyn(&widget, rect)
     }
 }
 
@@ -200,26 +204,44 @@ pub enum WidgetInput {
     Event(WidgetEvent),
 }
 
+pub struct GuiSublayer<'a, Renderer> {
+    pub layer: &'a GuiLayer<Renderer>,
+    pub offset: Vec2,
+    pub clip: Rect,
+}
+
+#[allow(unused)]
 pub trait Widget: 'static {
-    type Primitive: Primitive;
+    type Renderer: GuiRenderer;
     fn layout_info(&self) -> LayoutInfo;
-    #[allow(unused)]
-    fn layout_children(
-        &mut self,
-        layouts: &mut WidgetLayouts<Self::Primitive>,
-        rect: Rect,
-    ) -> Vec2 {
+    fn layout_children(&mut self, layouts: &mut WidgetLayouts<Self::Renderer>, rect: Rect) -> Vec2 {
         self.layout_info().size
     }
     fn reset_input(&mut self) {}
-    #[allow(unused)]
-    fn handle_input(&mut self, rect: Rect, input: &GuiInput) -> WidgetInput {
+    fn handle_input(&mut self, input: &GuiInput, rect: Rect) -> WidgetInput {
         WidgetInput::Pass
     }
-    fn draw(&mut self, renderer: &mut GuiRenderer<Self::Primitive>, rect: Rect);
+    fn sublayer(&self, rect: Rect) -> Option<GuiSublayer<Self::Renderer>> {
+        None
+    }
+    fn draw_text(
+        &self,
+        renderer: &Self::Renderer,
+        text_brush: &mut GuiTextBrush<Self::Renderer>,
+        layer: <Self::Renderer as GuiRenderer>::TextLayer,
+        rect: Rect,
+    ) {
+    }
+    fn draw(
+        &self,
+        renderer: &Self::Renderer,
+        batcher: &mut GuiBatcher<Self::Renderer>,
+        rect: Rect,
+    ) {
+    }
 }
 
-type Wrc<T> = Rc<RefCell<dyn Widget<Primitive = T>>>;
+type Wrc<Renderer> = Rc<RefCell<dyn Widget<Renderer = Renderer>>>;
 
 pub struct WidgetRc<T: ?Sized>(Rc<RefCell<T>>);
 
@@ -242,12 +264,12 @@ impl<T: ?Sized> Clone for WidgetRc<T> {
     }
 }
 
-pub struct GuiLayer<T> {
-    layouts: WidgetLayouts<T>,
-    grabbed_input: Option<WidgetLayout<T>>,
+pub struct GuiLayer<Renderer> {
+    layouts: WidgetLayouts<Renderer>,
+    grabbed_input: Option<WidgetLayout<Renderer>>,
 }
 
-impl<T: Primitive> GuiLayer<T> {
+impl<Renderer: GuiRenderer> GuiLayer<Renderer> {
     pub fn new() -> Self {
         GuiLayer::default()
     }
@@ -258,20 +280,19 @@ impl<T: Primitive> GuiLayer<T> {
         self.layouts.clear();
         self.grabbed_input = None;
     }
-    fn layout_dyn(&mut self, root: &Wrc<T>, rect: Rect) -> Vec2 {
+    fn layout_dyn(&mut self, root: &Wrc<Renderer>, rect: Rect) -> Vec2 {
         self.clear();
         self.layouts.add_dyn(root, rect)
     }
     pub fn layout_rc<W>(&mut self, root: &WidgetRc<W>, rect: Rect) -> Vec2
     where
-        W: Widget<Primitive = T>,
+        W: Widget<Renderer = Renderer>,
     {
         self.clear();
         self.layouts.add(root, rect)
     }
     pub fn relayout(&mut self, rect: Rect) -> Vec2 {
-        if let Some(root) = self.layouts.0.first() {
-            let root = root.widget.clone();
+        if let Some(root) = self.layouts.root() {
             self.layout_dyn(&root, rect)
         } else {
             Vec2::ZERO
@@ -290,14 +311,16 @@ impl<T: Primitive> GuiLayer<T> {
                 grabbed: true,
                 ..input.clone()
             };
-            let widget_input = item.widget.borrow_mut().handle_input(item.rect, &input);
+            let widget_input = item.widget.borrow_mut().handle_input(&input, item.rect);
             if !matches!(widget_input, WidgetInput::Grab) {
                 self.grabbed_input = None;
             }
             if let WidgetInput::Event(event) = widget_input {
                 WidgetInput::Event(event)
-            } else {
+            } else if self.grabbed_input.is_some() {
                 WidgetInput::Grab
+            } else {
+                widget_input
             }
         } else {
             let mut blocked = false;
@@ -305,7 +328,7 @@ impl<T: Primitive> GuiLayer<T> {
             for item in self.layouts.iter().rev() {
                 let mut widget = item.widget.borrow_mut();
                 if !blocked && item.rect.contains(input.pointer) {
-                    match widget.handle_input(item.rect, input) {
+                    match widget.handle_input(input, item.rect) {
                         WidgetInput::Pass => {}
                         WidgetInput::Block => blocked = true,
                         WidgetInput::Grab => {
@@ -323,6 +346,8 @@ impl<T: Primitive> GuiLayer<T> {
             }
             if let Some(event) = widget_event {
                 WidgetInput::Event(event)
+            } else if self.grabbed_input.is_some() {
+                WidgetInput::Grab
             } else if blocked {
                 WidgetInput::Block
             } else {
@@ -330,39 +355,25 @@ impl<T: Primitive> GuiLayer<T> {
             }
         }
     }
-    fn draw_items(&self, renderer: &mut GuiRenderer<T>) {
+    fn draw_text(
+        &self,
+        renderer: &Renderer,
+        text_brush: &mut GuiTextBrush<Renderer>,
+        layer: Renderer::TextLayer,
+    ) {
         for item in self.layouts.iter() {
-            item.widget.borrow_mut().draw(renderer, item.rect);
+            item.widget
+                .borrow_mut()
+                .draw_text(renderer, text_brush, layer.clone(), item.rect);
         }
     }
-    pub fn draw(&self, stage: &mut GuiStage<T>, text_brush: &mut TextBrush<T::Layer>) {
-        let mut layer_index = 0;
-        let mut renderer = GuiRenderer {
-            stage,
-            text_brush,
-            layer: T::layer(layer_index),
-            layer_index: &mut layer_index,
-        };
-        self.draw_items(&mut renderer);
-    }
-    pub fn draw_scroll_area(&self, renderer: &mut GuiRenderer<T>, offset: Vec2, clip: Rect) {
-        *renderer.layer_index += 1;
-        let layer = T::layer(*renderer.layer_index);
-        if let Some(camera) = renderer.stage.get_camera(&renderer.layer) {
-            renderer
-                .stage
-                .set_camera(layer.clone(), camera.clone().with_scroll(offset, clip));
+    fn draw(&self, renderer: &Renderer, batcher: &mut GuiBatcher<Renderer>) {
+        for item in self.layouts.iter() {
+            item.widget.borrow_mut().draw(renderer, batcher, item.rect);
         }
-        let mut scroll_renderer = GuiRenderer {
-            stage: renderer.stage,
-            text_brush: renderer.text_brush,
-            layer,
-            layer_index: renderer.layer_index,
-        };
-        self.draw_items(&mut scroll_renderer);
     }
 }
-impl<T: Primitive> Default for GuiLayer<T> {
+impl<Renderer: GuiRenderer> Default for GuiLayer<Renderer> {
     fn default() -> Self {
         GuiLayer {
             layouts: WidgetLayouts::new(),
@@ -371,36 +382,37 @@ impl<T: Primitive> Default for GuiLayer<T> {
     }
 }
 
-pub struct Gui<L, T> {
-    layers: BTreeMap<L, GuiLayer<T>>,
+pub struct Gui<Renderer: GuiRenderer> {
+    layers: BTreeMap<Renderer::GuiLayer, GuiLayer<Renderer>>,
     input: GuiInput,
 }
 
-impl<L, T> Gui<L, T>
-where
-    L: Ord,
-    T: Primitive,
-{
+impl<Renderer: GuiRenderer> Gui<Renderer> {
     pub fn new() -> Self {
         Gui {
             layers: BTreeMap::new(),
             input: GuiInput::new(),
         }
     }
-    pub fn clear_layout(&mut self, layer: &L) {
+    pub fn clear_layout(&mut self, layer: &Renderer::GuiLayer) {
         if let Some(gui) = self.layers.get_mut(layer) {
             gui.clear();
         }
     }
-    pub fn layout<W>(&mut self, layer: L, root: W, rect: Rect) -> Vec2
+    pub fn layout<W>(&mut self, layer: Renderer::GuiLayer, root: W, rect: Rect) -> Vec2
     where
-        W: Widget<Primitive = T>,
+        W: Widget<Renderer = Renderer>,
     {
         self.layout_rc(layer, &WidgetRc::new(root), rect)
     }
-    pub fn layout_rc<W>(&mut self, layer: L, root: &WidgetRc<W>, rect: Rect) -> Vec2
+    pub fn layout_rc<W>(
+        &mut self,
+        layer: Renderer::GuiLayer,
+        root: &WidgetRc<W>,
+        rect: Rect,
+    ) -> Vec2
     where
-        W: Widget<Primitive = T>,
+        W: Widget<Renderer = Renderer>,
     {
         self.layers.entry(layer).or_default().layout_rc(root, rect)
     }
@@ -411,7 +423,7 @@ where
     }
     pub fn relayout_with<F>(&mut self, f: F)
     where
-        F: Fn(&L) -> Rect,
+        F: Fn(&Renderer::GuiLayer) -> Rect,
     {
         for (layer, gui) in self.layers.iter_mut() {
             gui.relayout(f(layer));
@@ -434,27 +446,52 @@ where
         self.input.update();
         final_input
     }
+    fn foreach_sublayer<F>(
+        layer: &Renderer::GuiLayer,
+        gui: &GuiLayer<Renderer>,
+        scroll: Option<(Vec2, Rect)>,
+        index: &mut usize,
+        f: &mut F,
+    ) where
+        F: FnMut(&GuiLayer<Renderer>, Renderer::TextLayer, Option<(Vec2, Rect)>),
+    {
+        f(gui, Renderer::text_layer(layer, *index), scroll);
+        for sublayer in gui.layouts.sublayers.iter() {
+            *index += 1;
+            let sublayer_widget = sublayer.widget.borrow();
+            let GuiSublayer {
+                layer: gui,
+                offset,
+                clip,
+            } = sublayer_widget.sublayer(sublayer.rect).unwrap();
+            Self::foreach_sublayer(layer, gui, Some((offset, clip)), index, f);
+        }
+    }
+    pub fn draw_text(&self, gui_renderer: &Renderer, text_brush: &mut GuiTextBrush<Renderer>) {
+        for (layer, gui) in self.layers.iter() {
+            let mut index = 0;
+            Self::foreach_sublayer(layer, gui, None, &mut index, &mut |gui, layer, _| {
+                gui.draw_text(gui_renderer, text_brush, layer)
+            });
+        }
+    }
     pub fn draw(
         &mut self,
-        stage: &mut GuiStage<T>,
-        text_brush: &mut TextBrush<T::Layer>,
-        viewport: Rect,
+        gui_renderer: &Renderer,
+        text_brush: &mut GuiTextBrush<Renderer>,
+        batcher: &mut GuiBatcher<Renderer>,
     ) {
-        let mut layer_index = 0;
-        let mut renderer = GuiRenderer {
-            stage,
-            text_brush,
-            layer: T::layer(layer_index),
-            layer_index: &mut layer_index,
-        };
-        let camera = Camera::from_viewport(viewport);
-        for gui in self.layers.values_mut() {
-            renderer
-                .stage
-                .set_camera(T::Layer::clone(&renderer.layer), camera.clone());
-            gui.draw_items(&mut renderer);
-            *renderer.layer_index += 1;
-            renderer.layer = T::layer(*renderer.layer_index);
+        for (layer, gui) in self.layers.iter() {
+            let mut index = 0;
+            Self::foreach_sublayer(layer, gui, None, &mut index, &mut |gui, layer, scroll| {
+                let (camera, clip) = scroll
+                    .map(|(offset, clip)| (TSTransform::from_translation(offset), Some(clip)))
+                    .unwrap_or_default();
+                batcher.pipeline.set_clip(batcher.context, clip);
+                batcher.set_camera(camera);
+                gui.draw(gui_renderer, batcher);
+                text_brush.draw_layer(batcher, &layer);
+            });
         }
     }
 }
@@ -563,15 +600,15 @@ impl From<PaddingDe> for Padding {
     }
 }
 
-pub enum ContainerItem<T> {
+pub enum ContainerItem<Renderer> {
     Empty(LayoutInfo),
-    Widget(Wrc<T>),
+    Widget(Wrc<Renderer>),
 }
 
-impl<T: Primitive> ContainerItem<T> {
+impl<Renderer: GuiRenderer> ContainerItem<Renderer> {
     pub fn from_widget<W>(widget: &WidgetRc<W>) -> Self
     where
-        W: Widget<Primitive = T>,
+        W: Widget<Renderer = Renderer>,
     {
         ContainerItem::Widget(widget.0.clone())
     }
@@ -583,19 +620,19 @@ impl<T: Primitive> ContainerItem<T> {
     }
 }
 
-pub struct Container<T> {
+pub struct Container<Renderer> {
     layout: LayoutInfo,
     direction: Direction,
     cross_axis: CrossAxis,
     padding: Padding,
     size: Vec2,
-    items: Vec<ContainerItem<T>>,
+    items: Vec<ContainerItem<Renderer>>,
 }
 
-impl<T: Primitive> Container<T> {
+impl<Renderer: GuiRenderer> Container<Renderer> {
     pub fn new(direction: Direction, cross_axis: CrossAxis, class: &str) -> Self {
         Container {
-            layout: LayoutInfo::from_style(class),
+            layout: LayoutInfo::from_style(class, Vec2::ZERO),
             direction,
             cross_axis,
             padding: style(class, "padding"),
@@ -607,7 +644,7 @@ impl<T: Primitive> Container<T> {
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
-    fn add_item(&mut self, item: ContainerItem<T>) {
+    fn add_item(&mut self, item: ContainerItem<Renderer>) {
         let between = if self.items.is_empty() {
             0.0
         } else {
@@ -631,7 +668,7 @@ impl<T: Primitive> Container<T> {
     }
     pub fn add<W>(&mut self, widget: W) -> WidgetRc<W>
     where
-        W: Widget<Primitive = T>,
+        W: Widget<Renderer = Renderer>,
     {
         let widget = WidgetRc::new(widget);
         self.add_item(ContainerItem::from_widget(&widget));
@@ -639,7 +676,7 @@ impl<T: Primitive> Container<T> {
     }
     pub fn add_rc<W>(&mut self, widget: &WidgetRc<W>)
     where
-        W: Widget<Primitive = T>,
+        W: Widget<Renderer = Renderer>,
     {
         self.add_item(ContainerItem::from_widget(widget));
     }
@@ -656,8 +693,8 @@ impl<T> Default for Container<T> {
         }
     }
 }
-impl<T: Primitive> Widget for Container<T> {
-    type Primitive = T;
+impl<Renderer: GuiRenderer> Widget for Container<Renderer> {
+    type Renderer = Renderer;
     fn layout_info(&self) -> LayoutInfo {
         let layout_size = self.size + self.padding.min_size();
         LayoutInfo {
@@ -665,7 +702,7 @@ impl<T: Primitive> Widget for Container<T> {
             grow: self.layout.grow,
         }
     }
-    fn layout_children(&mut self, layouts: &mut WidgetLayouts<T>, mut rect: Rect) -> Vec2 {
+    fn layout_children(&mut self, layouts: &mut WidgetLayouts<Renderer>, mut rect: Rect) -> Vec2 {
         if self.items.is_empty() {
             return Vec2::ZERO;
         }
@@ -716,20 +753,19 @@ impl<T: Primitive> Widget for Container<T> {
             }
         }
     }
-    fn draw(&mut self, _renderer: &mut GuiRenderer<T>, _rect: Rect) {}
 }
 
-pub struct GridContainer<T> {
+pub struct GridContainer<Renderer> {
     layout: LayoutInfo,
     padding: Padding,
     item_size: Vec2,
-    items: Vec<ContainerItem<T>>,
+    items: Vec<ContainerItem<Renderer>>,
 }
 
-impl<T: Primitive> GridContainer<T> {
+impl<Renderer: GuiRenderer> GridContainer<Renderer> {
     pub fn new(class: &str) -> Self {
         GridContainer {
-            layout: LayoutInfo::from_style(class),
+            layout: LayoutInfo::from_style(class, Vec2::ZERO),
             padding: style(class, "padding"),
             item_size: Vec2::ZERO,
             items: Vec::new(),
@@ -739,7 +775,7 @@ impl<T: Primitive> GridContainer<T> {
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
-    fn add_item(&mut self, item: ContainerItem<T>) {
+    fn add_item(&mut self, item: ContainerItem<Renderer>) {
         self.item_size = self.item_size.max(item.layout_info().size);
         self.items.push(item);
     }
@@ -748,7 +784,7 @@ impl<T: Primitive> GridContainer<T> {
     }
     pub fn add<W>(&mut self, widget: W) -> WidgetRc<W>
     where
-        W: Widget<Primitive = T>,
+        W: Widget<Renderer = Renderer>,
     {
         let widget = WidgetRc::new(widget);
         self.add_item(ContainerItem::from_widget(&widget));
@@ -756,12 +792,12 @@ impl<T: Primitive> GridContainer<T> {
     }
     pub fn add_rc<W>(&mut self, widget: &WidgetRc<W>)
     where
-        W: Widget<Primitive = T>,
+        W: Widget<Renderer = Renderer>,
     {
         self.add_item(ContainerItem::from_widget(widget));
     }
 }
-impl<T> Default for GridContainer<T> {
+impl<Renderer> Default for GridContainer<Renderer> {
     fn default() -> Self {
         GridContainer {
             layout: LayoutInfo::default(),
@@ -771,12 +807,12 @@ impl<T> Default for GridContainer<T> {
         }
     }
 }
-impl<T: Primitive> Widget for GridContainer<T> {
-    type Primitive = T;
+impl<Renderer: GuiRenderer> Widget for GridContainer<Renderer> {
+    type Renderer = Renderer;
     fn layout_info(&self) -> LayoutInfo {
         self.layout
     }
-    fn layout_children(&mut self, layouts: &mut WidgetLayouts<T>, mut rect: Rect) -> Vec2 {
+    fn layout_children(&mut self, layouts: &mut WidgetLayouts<Renderer>, mut rect: Rect) -> Vec2 {
         if self.items.is_empty() {
             return Vec2::ZERO;
         }
@@ -802,23 +838,22 @@ impl<T: Primitive> Widget for GridContainer<T> {
         }
         vec2(rect.width(), pos.y) + self.padding.min_size()
     }
-    fn draw(&mut self, _renderer: &mut GuiRenderer<T>, _rect: Rect) {}
 }
 
-pub struct Label<T> {
+pub struct Label<Renderer> {
     layout: LayoutInfo,
     font: Font,
     color: Color,
     text: Cow<'static, str>,
     align: Align2,
     wrap: bool,
-    _marker: PhantomData<T>,
+    _marker: PhantomData<Renderer>,
 }
 
-impl<T> Label<T> {
+impl<Renderer> Label<Renderer> {
     pub fn new<S: Into<Cow<'static, str>>>(class: &str, text: S) -> Self {
         Label {
-            layout: LayoutInfo::from_style(class),
+            layout: LayoutInfo::from_style(class, Vec2::ZERO),
             font: Font::from_style(class),
             color: Color::WHITE,
             text: text.into(),
@@ -839,20 +874,27 @@ impl<T> Label<T> {
     pub fn set_text<S: Into<Cow<'static, str>>>(&mut self, text: S) {
         self.text = text.into();
     }
-    pub fn autosize<L>(&mut self, text_brush: &mut TextBrush<L>, layer: L)
-    where
-        L: Clone + Ord + PartialEq + Hash + 'static,
-    {
+}
+impl<Renderer: GuiRenderer> Label<Renderer> {
+    pub fn autosize(
+        &mut self,
+        text_brush: &mut GuiTextBrush<Renderer>,
+        layer: Renderer::TextLayer,
+    ) {
         let size = text_brush.text_bounds(
             layer,
-            self.align,
-            if self.wrap {
-                Some(self.layout.size.x)
-            } else {
-                None
+            &Text {
+                position: Pos2::ZERO,
+                align: self.align,
+                wrap: if self.wrap {
+                    Some(self.layout.size.x)
+                } else {
+                    None
+                },
+                font: self.font,
+                color: self.color,
+                text: self.text.as_ref().into(),
             },
-            self.font,
-            &self.text,
         );
         if let Some(size) = size {
             if !self.wrap {
@@ -862,20 +904,29 @@ impl<T> Label<T> {
         }
     }
 }
-impl<T: Primitive> Widget for Label<T> {
-    type Primitive = T;
+impl<Renderer: GuiRenderer> Widget for Label<Renderer> {
+    type Renderer = Renderer;
     fn layout_info(&self) -> LayoutInfo {
         self.layout
     }
-    fn draw(&mut self, renderer: &mut GuiRenderer<T>, rect: Rect) {
-        renderer.draw(T::from_text(Text {
-            position: self.align.pos_in_rect(&rect),
-            align: self.align,
-            wrap: if self.wrap { Some(rect.width()) } else { None },
-            font: self.font,
-            color: self.color,
-            text: self.text.clone(),
-        }));
+    fn draw_text(
+        &self,
+        _renderer: &Renderer,
+        text_brush: &mut GuiTextBrush<Renderer>,
+        layer: Renderer::TextLayer,
+        rect: Rect,
+    ) {
+        text_brush.queue(
+            layer,
+            &Text {
+                position: self.align.pos_in_rect(&rect),
+                align: self.align,
+                wrap: if self.wrap { Some(rect.width()) } else { None },
+                font: self.font,
+                color: self.color,
+                text: self.text.as_ref().into(),
+            },
+        );
     }
 }
 
@@ -887,15 +938,15 @@ pub enum ButtonState {
     Disable,
 }
 
-pub struct Button<T> {
+pub struct Button<Renderer> {
     name: Cow<'static, str>,
     layout: LayoutInfo,
-    label: Label<T>,
+    label: Label<Renderer>,
     state: ButtonState,
     event_payload: Option<Rc<dyn Any>>,
 }
 
-impl<T> Button<T> {
+impl<Renderer> Button<Renderer> {
     pub fn new<S: Into<Cow<'static, str>>, L: Into<Cow<'static, str>>>(
         class: &str,
         name: S,
@@ -903,7 +954,7 @@ impl<T> Button<T> {
     ) -> Self {
         Button {
             name: name.into(),
-            layout: LayoutInfo::from_style(class),
+            layout: LayoutInfo::from_style(class, vec2(128.0, 32.0)),
             label: Label::new(class, label),
             state: ButtonState::Normal,
             event_payload: None,
@@ -920,8 +971,8 @@ impl<T> Button<T> {
         self.event_payload = Some(Rc::new(payload));
     }
 }
-impl<T: Primitive> Widget for Button<T> {
-    type Primitive = T;
+impl<Renderer: GuiRenderer> Widget for Button<Renderer> {
+    type Renderer = Renderer;
     fn layout_info(&self) -> LayoutInfo {
         self.layout
     }
@@ -930,7 +981,7 @@ impl<T: Primitive> Widget for Button<T> {
             self.state = ButtonState::Normal;
         }
     }
-    fn handle_input(&mut self, _rect: Rect, input: &GuiInput) -> WidgetInput {
+    fn handle_input(&mut self, input: &GuiInput, _rect: Rect) -> WidgetInput {
         if self.state != ButtonState::Disable {
             self.state = if input.primary.pressed() {
                 ButtonState::Press
@@ -946,32 +997,44 @@ impl<T: Primitive> Widget for Button<T> {
         }
         WidgetInput::Block
     }
-    fn draw(&mut self, renderer: &mut GuiRenderer<T>, rect: Rect) {
-        renderer.draw(T::from_button(rect, self.state));
-        renderer.draw(T::from_text(Text {
-            position: rect.center(),
-            align: Align2::CENTER_CENTER,
-            wrap: None,
-            font: self.label.font,
-            color: Color::BLACK,
-            text: self.label.text.clone(),
-        }));
+    fn draw_text(
+        &self,
+        _renderer: &Renderer,
+        text_brush: &mut GuiTextBrush<Renderer>,
+        layer: Renderer::TextLayer,
+        rect: Rect,
+    ) {
+        text_brush.queue(
+            layer,
+            &Text {
+                position: rect.center(),
+                align: Align2::CENTER_CENTER,
+                wrap: None,
+                font: self.label.font,
+                color: Color::BLACK,
+                text: self.label.text.as_ref().into(),
+            },
+        );
+    }
+    fn draw(&self, renderer: &Renderer, batcher: &mut GuiBatcher<Renderer>, rect: Rect) {
+        ColorRect(renderer.button_color(self.state), rect)
+            .draw(batcher, &renderer.button_material(self.state));
     }
 }
 
-pub struct Slider<T> {
+pub struct Slider<Renderer> {
     layout: LayoutInfo,
     state: ButtonState,
     direction: Direction,
     handle_size: f32,
     value: f32,
-    _marker: PhantomData<T>,
+    _marker: PhantomData<Renderer>,
 }
 
-impl<T> Slider<T> {
+impl<Renderer> Slider<Renderer> {
     pub fn new(class: &str, direction: Direction) -> Self {
         Slider {
-            layout: LayoutInfo::from_style(class),
+            layout: LayoutInfo::from_style(class, vec2(24.0, 24.0)),
             state: ButtonState::Normal,
             direction,
             handle_size: 0.0,
@@ -1008,8 +1071,8 @@ impl<T> Slider<T> {
         }
     }
 }
-impl<T: Primitive> Widget for Slider<T> {
-    type Primitive = T;
+impl<Renderer: GuiRenderer> Widget for Slider<Renderer> {
+    type Renderer = Renderer;
     fn layout_info(&self) -> LayoutInfo {
         self.layout
     }
@@ -1018,7 +1081,7 @@ impl<T: Primitive> Widget for Slider<T> {
             self.state = ButtonState::Normal;
         }
     }
-    fn handle_input(&mut self, mut rect: Rect, input: &GuiInput) -> WidgetInput {
+    fn handle_input(&mut self, input: &GuiInput, mut rect: Rect) -> WidgetInput {
         if self.state != ButtonState::Disable {
             self.state = if input.primary.pressed() {
                 ButtonState::Press
@@ -1047,30 +1110,31 @@ impl<T: Primitive> Widget for Slider<T> {
             WidgetInput::Block
         }
     }
-    fn draw(&mut self, renderer: &mut GuiRenderer<T>, rect: Rect) {
-        renderer.draw(T::from_button(self.handle_rect(rect), self.state));
+    fn draw(&self, renderer: &Renderer, batcher: &mut GuiBatcher<Renderer>, rect: Rect) {
+        ColorRect(renderer.button_color(self.state), self.handle_rect(rect))
+            .draw(batcher, &renderer.button_material(self.state));
     }
 }
 
-pub struct ScrollArea<T> {
+pub struct ScrollArea<Renderer> {
     layout: LayoutInfo,
-    scrollbar: WidgetRc<Slider<T>>,
-    content: Wrc<T>,
-    content_layout: GuiLayer<T>,
+    scrollbar: WidgetRc<Slider<Renderer>>,
+    content: Wrc<Renderer>,
+    content_layer: GuiLayer<Renderer>,
     content_size: Vec2,
 }
 
-impl<T: Primitive> ScrollArea<T> {
+impl<Renderer: GuiRenderer> ScrollArea<Renderer> {
     pub fn new<W>(class: &str, direction: Direction, content: W) -> Self
     where
-        W: Widget<Primitive = T>,
+        W: Widget<Renderer = Renderer>,
     {
         let scrollbar = Slider::new("scrollbar", direction);
         ScrollArea {
-            layout: LayoutInfo::from_style(class),
+            layout: LayoutInfo::from_style(class, Vec2::ZERO),
             scrollbar: WidgetRc::new(scrollbar),
             content: Rc::new(RefCell::new(content)),
-            content_layout: GuiLayer::new(),
+            content_layer: GuiLayer::new(),
             content_size: Vec2::ZERO,
         }
     }
@@ -1099,14 +1163,14 @@ impl<T: Primitive> ScrollArea<T> {
         }
     }
 }
-impl<T: Primitive> Widget for ScrollArea<T> {
-    type Primitive = T;
+impl<Renderer: GuiRenderer> Widget for ScrollArea<Renderer> {
+    type Renderer = Renderer;
     fn layout_info(&self) -> LayoutInfo {
         self.layout
     }
-    fn layout_children(&mut self, layouts: &mut WidgetLayouts<T>, rect: Rect) -> Vec2 {
+    fn layout_children(&mut self, layouts: &mut WidgetLayouts<Renderer>, rect: Rect) -> Vec2 {
         let (content_rect, scrollbar_rect) = self.rects(rect);
-        self.content_size = self.content_layout.layout_dyn(
+        self.content_size = self.content_layer.layout_dyn(
             &self.content,
             Rect::from_min_size(Pos2::ZERO, content_rect.size()),
         );
@@ -1126,147 +1190,139 @@ impl<T: Primitive> Widget for ScrollArea<T> {
         rect.size()
     }
     fn reset_input(&mut self) {
-        self.content_layout.reset_input();
+        self.content_layer.reset_input();
     }
-    fn handle_input(&mut self, rect: Rect, input: &GuiInput) -> WidgetInput {
+    fn handle_input(&mut self, input: &GuiInput, rect: Rect) -> WidgetInput {
+        let offset = rect.min.to_vec2() + self.scroll(rect);
+        self.content_layer
+            .handle_input(&input.with_pointer_offset(offset))
+    }
+    fn sublayer(&self, rect: Rect) -> Option<GuiSublayer<Self::Renderer>> {
         let (content_rect, _) = self.rects(rect);
         let offset = rect.min.to_vec2() + self.scroll(rect);
-        if content_rect.contains(input.pointer) || input.grabbed {
-            let mut input = input.with_pointer_offset(offset);
-            if let WidgetInput::Event(event) = self.content_layout.handle_input(&mut input) {
-                WidgetInput::Event(event)
-            } else if self.content_layout.is_input_grabbed() {
-                WidgetInput::Grab
-            } else {
-                WidgetInput::Block
-            }
-        } else {
-            WidgetInput::Pass
-        }
-    }
-    fn draw(&mut self, renderer: &mut GuiRenderer<T>, rect: Rect) {
-        let (content_rect, _) = self.rects(rect);
-        let offset = rect.min.to_vec2() + self.scroll(rect);
-        self.content_layout
-            .draw_scroll_area(renderer, offset, content_rect);
+        Some(GuiSublayer {
+            layer: &self.content_layer,
+            offset,
+            clip: content_rect,
+        })
     }
 }
 
-pub struct ScrollList<I, W, T> {
-    items: Vec<I>,
-    item_fn: Box<dyn Fn(&I) -> W>,
-    visible_items: RangeInclusive<usize>,
-    padding: Padding,
-    item_size: Vec2,
-    scroll_area: ScrollArea<T>,
-}
+// pub struct ScrollList<I, W, T> {
+//     items: Vec<I>,
+//     item_fn: Box<dyn Fn(&I) -> W>,
+//     visible_items: RangeInclusive<usize>,
+//     padding: Padding,
+//     item_size: Vec2,
+//     scroll_area: ScrollArea<T>,
+// }
 
-impl<I, W, T> ScrollList<I, W, T>
-where
-    I: 'static,
-    W: Widget<Primitive = T>,
-    T: Primitive,
-{
-    pub fn new<F>(class: &str, items: Vec<I>, item_fn: F) -> Self
-    where
-        F: Fn(&I) -> W + 'static,
-    {
-        let padding: Padding = style(class, "padding");
-        let item_size = items
-            .first()
-            .map(|item| item_fn(item).layout_info().size)
-            .unwrap_or_default();
-        let content_size = padding.min_size()
-            + Vec2::new(
-                item_size.x,
-                (item_size.y * items.len() as f32)
-                    + (padding.between * items.len().saturating_sub(1) as f32),
-            );
-        let mut content = Container::default();
-        content.add_empty(LayoutInfo::from_size(content_size));
-        ScrollList {
-            items,
-            item_fn: Box::new(item_fn),
-            visible_items: 1..=0,
-            padding,
-            item_size,
-            scroll_area: ScrollArea::new(class, Direction::Vertical, content),
-        }
-    }
-    fn empty_items_size(&self, count: usize) -> Vec2 {
-        Vec2::new(
-            self.item_size.x,
-            (self.item_size.y * count as f32)
-                + (self.padding.between * count.saturating_sub(1) as f32),
-        )
-    }
-    fn visible_items(&self, rect: Rect) -> RangeInclusive<usize> {
-        let scroll = self.scroll_area.scroll(rect);
-        let item_height = self.item_size.y + self.padding.between;
-        let first = -scroll.y / item_height;
-        let last = (-scroll.y + rect.height()) / item_height;
-        let last_index = self.items.len().saturating_sub(1);
-        (first.floor() as usize).min(last_index)..=(last.floor() as usize).min(last_index)
-    }
-    fn build_content(&mut self, rect: Rect, layout: bool) {
-        let mut content = Container {
-            direction: Direction::Vertical,
-            padding: self.padding,
-            ..Default::default()
-        };
-        if *self.visible_items.start() > 0 {
-            content.add_empty(LayoutInfo::from_size(
-                self.empty_items_size(*self.visible_items.start()),
-            ));
-        }
-        for index in self.visible_items.clone() {
-            content.add((self.item_fn)(&self.items[index]));
-        }
-        let last_index = self.items.len().saturating_sub(1);
-        if *self.visible_items.end() < last_index {
-            content.add_empty(LayoutInfo::from_size(
-                self.empty_items_size(last_index - *self.visible_items.end()),
-            ));
-        }
-        self.scroll_area.content = Rc::new(RefCell::new(content));
-        if layout {
-            let (content_rect, _) = self.scroll_area.rects(rect);
-            self.scroll_area.content_layout.layout_dyn(
-                &self.scroll_area.content,
-                Rect::from_min_size(Pos2::ZERO, content_rect.size()),
-            );
-        }
-    }
-}
-impl<I, W, T> Widget for ScrollList<I, W, T>
-where
-    I: 'static,
-    W: Widget<Primitive = T>,
-    T: Primitive,
-{
-    type Primitive = T;
-    fn layout_info(&self) -> LayoutInfo {
-        self.scroll_area.layout_info()
-    }
-    fn layout_children(&mut self, layouts: &mut WidgetLayouts<T>, rect: Rect) -> Vec2 {
-        if self.visible_items.is_empty() {
-            self.visible_items = self.visible_items(rect);
-            self.build_content(rect, false);
-        }
-        self.scroll_area.layout_children(layouts, rect)
-    }
-    fn reset_input(&mut self) {
-        self.scroll_area.reset_input();
-    }
-    fn handle_input(&mut self, rect: Rect, input: &GuiInput) -> WidgetInput {
-        self.scroll_area.handle_input(rect, input)
-    }
-    fn draw(&mut self, renderer: &mut GuiRenderer<T>, rect: Rect) {
-        let visible_items = self.visible_items(rect);
-        if visible_items != self.visible_items {
-            self.visible_items = visible_items;
-            self.build_content(rect, true);
-        }
-        self.scroll_area.draw(renderer, rect);
-    }
-}
+// impl<I, W, T> ScrollList<I, W, T>
+// where
+//     I: 'static,
+//     W: Widget<Primitive = T>,
+//     T: Primitive,
+// {
+//     pub fn new<F>(class: &str, items: Vec<I>, item_fn: F) -> Self
+//     where
+//         F: Fn(&I) -> W + 'static,
+//     {
+//         let padding: Padding = style(class, "padding");
+//         let item_size = items
+//             .first()
+//             .map(|item| item_fn(item).layout_info().size)
+//             .unwrap_or_default();
+//         let content_size = padding.min_size()
+//             + Vec2::new(
+//                 item_size.x,
+//                 (item_size.y * items.len() as f32)
+//                     + (padding.between * items.len().saturating_sub(1) as f32),
+//             );
+//         let mut content = Container::default();
+//         content.add_empty(LayoutInfo::from_size(content_size));
+//         ScrollList {
+//             items,
+//             item_fn: Box::new(item_fn),
+//             visible_items: 1..=0,
+//             padding,
+//             item_size,
+//             scroll_area: ScrollArea::new(class, Direction::Vertical, content),
+//         }
+//     }
+//     fn empty_items_size(&self, count: usize) -> Vec2 {
+//         Vec2::new(
+//             self.item_size.x,
+//             (self.item_size.y * count as f32)
+//                 + (self.padding.between * count.saturating_sub(1) as f32),
+//         )
+//     }
+//     fn visible_items(&self, rect: Rect) -> RangeInclusive<usize> {
+//         let scroll = self.scroll_area.scroll(rect);
+//         let item_height = self.item_size.y + self.padding.between;
+//         let first = -scroll.y / item_height;
+//         let last = (-scroll.y + rect.height()) / item_height;
+//         let last_index = self.items.len().saturating_sub(1);
+//         (first.floor() as usize).min(last_index)..=(last.floor() as usize).min(last_index)
+//     }
+//     fn build_content(&mut self, rect: Rect, layout: bool) {
+//         let mut content = Container {
+//             direction: Direction::Vertical,
+//             padding: self.padding,
+//             ..Default::default()
+//         };
+//         if *self.visible_items.start() > 0 {
+//             content.add_empty(LayoutInfo::from_size(
+//                 self.empty_items_size(*self.visible_items.start()),
+//             ));
+//         }
+//         for index in self.visible_items.clone() {
+//             content.add((self.item_fn)(&self.items[index]));
+//         }
+//         let last_index = self.items.len().saturating_sub(1);
+//         if *self.visible_items.end() < last_index {
+//             content.add_empty(LayoutInfo::from_size(
+//                 self.empty_items_size(last_index - *self.visible_items.end()),
+//             ));
+//         }
+//         self.scroll_area.content = Rc::new(RefCell::new(content));
+//         if layout {
+//             let (content_rect, _) = self.scroll_area.rects(rect);
+//             self.scroll_area.content_layout.layout_dyn(
+//                 &self.scroll_area.content,
+//                 Rect::from_min_size(Pos2::ZERO, content_rect.size()),
+//             );
+//         }
+//     }
+// }
+// impl<I, W, T> Widget for ScrollList<I, W, T>
+// where
+//     I: 'static,
+//     W: Widget<Primitive = T>,
+//     T: Primitive,
+// {
+//     type Primitive = T;
+//     fn layout_info(&self) -> LayoutInfo {
+//         self.scroll_area.layout_info()
+//     }
+//     fn layout_children(&mut self, layouts: &mut WidgetLayouts<T>, rect: Rect) -> Vec2 {
+//         if self.visible_items.is_empty() {
+//             self.visible_items = self.visible_items(rect);
+//             self.build_content(rect, false);
+//         }
+//         self.scroll_area.layout_children(layouts, rect)
+//     }
+//     fn reset_input(&mut self) {
+//         self.scroll_area.reset_input();
+//     }
+//     fn handle_input(&mut self, rect: Rect, input: &GuiInput) -> WidgetInput {
+//         self.scroll_area.handle_input(rect, input)
+//     }
+//     fn draw(&mut self, renderer: &mut GuiRenderer<T>, rect: Rect) {
+//         let visible_items = self.visible_items(rect);
+//         if visible_items != self.visible_items {
+//             self.visible_items = visible_items;
+//             self.build_content(rect, true);
+//         }
+//         self.scroll_area.draw(renderer, rect);
+//     }
+// }

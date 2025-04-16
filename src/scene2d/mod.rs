@@ -1,6 +1,6 @@
 pub mod sprite;
 
-use emath::{Pos2, Rect, Vec2};
+use emath::{Pos2, Rect, TSTransform, Vec2};
 
 use crate::{color::Color, Size};
 
@@ -59,38 +59,39 @@ impl From<Rect> for Instance {
     }
 }
 
+// #[derive(Clone, Copy)]
+// pub struct Camera {
+//     pub translate: Vec2,
+//     pub scale: Vec2,
+//     pub clip: Option<Rect>,
+// }
+
+// impl Camera {
+//     pub fn from_viewport(viewport: Rect) -> Self {
+//         let translate = -viewport.min.to_vec2().round();
+//         let scale = Vec2::new(2.0 / viewport.width(), 2.0 / viewport.height());
+//         Camera {
+//             translate,
+//             scale,
+//             clip: None,
+//         }
+//     }
+//     pub fn from_translate_scale(translate: Vec2, scale: f32) -> Self {
+//         Camera {
+//             translate,
+//             scale: Vec2::splat(scale),
+//             clip: None,
+//         }
+//     }
+//     pub fn with_scroll(mut self, offset: Vec2, clip: Rect) -> Self {
+//         self.translate += offset;
+//         let clip_offset = self.clip.map(|rect| rect.min).unwrap_or_default();
+//         self.clip = Some(clip.translate(clip_offset.to_vec2()));
+//         self
+//     }
+// }
+
 #[derive(Clone)]
-pub struct Camera {
-    pub translate: Vec2,
-    pub scale: Vec2,
-    pub clip: Option<Rect>,
-}
-
-impl Camera {
-    pub fn from_viewport(viewport: Rect) -> Self {
-        let translate = -viewport.center().to_vec2();
-        let scale = Vec2::new(2.0 / viewport.width(), 2.0 / viewport.height());
-        Camera {
-            translate,
-            scale,
-            clip: None,
-        }
-    }
-    pub fn from_translate_scale(translate: Vec2, scale: f32) -> Self {
-        Camera {
-            translate,
-            scale: Vec2::splat(scale),
-            clip: None,
-        }
-    }
-    pub fn with_scroll(mut self, offset: Vec2, clip: Rect) -> Self {
-        self.translate += offset;
-        let clip_offset = self.clip.map(|rect| rect.min).unwrap_or_default();
-        self.clip = Some(clip.translate(clip_offset.to_vec2()));
-        self
-    }
-}
-
 pub struct ScrollCamera {
     pub screen_size: Vec2,
     pub center: Pos2,
@@ -118,19 +119,23 @@ impl ScrollCamera {
     pub fn viewport(&self) -> Rect {
         Rect::from_center_size(self.center, self.screen_size / self.scale)
     }
-    pub fn camera(&self) -> Camera {
-        Camera::from_viewport(self.viewport())
+    pub fn transform(&self) -> TSTransform {
+        let screen_center = self.screen_size / 2.0;
+        TSTransform::new(self.center.to_vec2() - screen_center, self.scale).inverse()
     }
-    pub fn camera_view(&self, view: Rect) -> Camera {
-        let center_offset = view.center() - (self.screen_size / 2.0).to_pos2();
-        let mut camera = Camera::from_viewport(Rect::from_center_size(
-            self.center - (center_offset / self.scale),
-            self.screen_size / self.scale,
-        ));
-        camera.clip = Some(view);
-        camera
-    }
-    pub fn to_world(&self, pos: Pos2) -> Pos2 {
+    // pub fn camera(&self) -> Camera {
+    //     Camera::from_viewport(self.viewport())
+    // }
+    // pub fn camera_view(&self, view: Rect) -> Camera {
+    //     let center_offset = view.center() - (self.screen_size / 2.0).to_pos2();
+    //     let mut camera = Camera::from_viewport(Rect::from_center_size(
+    //         self.center - (center_offset / self.scale),
+    //         self.screen_size / self.scale,
+    //     ));
+    //     camera.clip = Some(view);
+    //     camera
+    // }
+    pub fn screen_to_world(&self, pos: Pos2) -> Pos2 {
         let viewport = self.viewport();
         let x = emath::remap(
             pos.x,

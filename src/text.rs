@@ -1,11 +1,12 @@
 use std::{
     borrow::Cow,
+    collections::HashMap,
     hash::{Hash, Hasher},
     io::Read,
     path::{Path, PathBuf},
 };
 
-use emath::{Align, Align2, OrderedFloat, Pos2, Rect};
+use emath::{Align, Align2, OrderedFloat, Pos2, Rect, TSTransform};
 use glyph_brush::*;
 use serde::Deserialize;
 
@@ -15,7 +16,7 @@ use crate::{
     impl_sub_asset,
     scene2d::Instance,
     style::{style, style_or},
-    Size, Stage,
+    Batcher, Buffer, Pipeline, Size,
 };
 
 impl Asset for ab_glyph::FontArc {
@@ -78,12 +79,12 @@ pub struct Text<'a> {
 }
 
 #[derive(Clone, PartialEq)]
-struct Extra<T> {
-    layer: T,
+struct Extra<Layer> {
+    layer: Layer,
     color: Color,
 }
 
-impl<T: Hash> Hash for Extra<T> {
+impl<Layer: Hash> Hash for Extra<Layer> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.layer.hash(state);
         OrderedFloat(self.color.r).hash(state);
@@ -93,22 +94,26 @@ impl<T: Hash> Hash for Extra<T> {
     }
 }
 
-pub trait GlyphTexture {
-    type Context;
-    type DrawParams: Eq + PartialOrd;
-    fn resize(&mut self, context: &mut Self::Context, size: Size);
-    fn update(&mut self, context: &mut Self::Context, min: [u32; 2], max: [u32; 2], data: &[u8]);
-    fn draw_params(&self) -> Self::DrawParams;
+pub trait GlyphTexture<P: Pipeline + ?Sized> {
+    fn resize(&mut self, context: &mut P::Context, size: Size);
+    fn update(&mut self, context: &mut P::Context, min: [u32; 2], max: [u32; 2], data: &[u8]);
+    fn material(&self) -> P::Material;
 }
 
-pub struct TextBrush<T> {
-    glyph_brush: GlyphBrush<(T, Instance), Extra<T>>,
-    vertices: Vec<(T, Instance)>,
+pub trait TextPipeline: Pipeline<Instance = Instance, Camera = TSTransform> {
+    fn glyph_texture(&mut self) -> &mut impl GlyphTexture<Self>;
+    fn set_clip(&mut self, context: &mut Self::Context, clip: Option<Rect>);
 }
 
-impl<T> TextBrush<T>
+pub struct TextBrush<P: TextPipeline, L> {
+    glyph_brush: GlyphBrush<(L, Instance), Extra<L>>,
+    vertices: HashMap<L, P::InstanceBuffer>,
+}
+
+impl<P, L> TextBrush<P, L>
 where
-    T: Clone + Ord + Hash + 'static,
+    P: TextPipeline,
+    L: Clone + Eq + Hash + 'static,
 {
     pub fn new(fonts: Vec<FontAsset>) -> Self {
         let fonts = fonts.into_iter().map(|font| font.0).collect();
@@ -117,7 +122,7 @@ where
             .build();
         TextBrush {
             glyph_brush,
-            vertices: Vec::new(),
+            vertices: HashMap::new(),
         }
     }
     pub fn glyph_texture_size(&self) -> Size {
@@ -131,7 +136,7 @@ where
         }
         Rect::from_min_max(to_pos(rect.min), to_pos(rect.max))
     }
-    fn to_vertex(vertex: GlyphVertex<Extra<T>>) -> (T, Instance) {
+    fn to_vertex(vertex: GlyphVertex<Extra<L>>) -> (L, Instance) {
         let GlyphVertex {
             mut tex_coords,
             mut pixel_coords,
@@ -198,28 +203,23 @@ where
         }
     }
 
-    pub fn text_bounds(
-        &mut self,
-        layer: T,
-        align: Align2,
-        wrap: Option<f32>,
-        font: Font,
-        text: &str,
-    ) -> Option<Rect> {
-        let bounds_width = wrap.unwrap_or(f32::INFINITY);
-        let layout = Self::make_layout(align, wrap.is_some());
+    pub fn text_bounds(&mut self, layer: L, text: &Text) -> Option<Rect> {
+        let position = text.position;
+        let bounds_width = text.wrap.unwrap_or(f32::INFINITY);
+        let layout = Self::make_layout(text.align, text.wrap.is_some());
         let text = glyph_brush::Text {
-            text,
-            scale: font.scale.into(),
-            font_id: font.font_id,
+            text: &text.text,
+            scale: text.font.scale.into(),
+            font_id: text.font.font_id,
             extra: Extra {
                 layer,
-                color: Color::WHITE,
+                color: text.color,
             },
         };
         self.glyph_brush
             .glyph_bounds(
                 Section::builder()
+                    .with_screen_position(position)
                     .with_bounds((bounds_width, f32::INFINITY))
                     .with_layout(layout)
                     .add_text(text),
@@ -227,7 +227,7 @@ where
             .map(Self::to_rect)
     }
 
-    pub fn queue(&mut self, layer: T, text: &Text) {
+    pub fn queue(&mut self, layer: L, text: &Text) {
         let position = text.position;
         let bounds_width = text.wrap.unwrap_or(f32::INFINITY);
         let layout = Self::make_layout(text.align, text.wrap.is_some());
@@ -249,12 +249,8 @@ where
         );
     }
 
-    pub fn draw<G: GlyphTexture, C>(
-        &mut self,
-        context: &mut G::Context,
-        glyph_texture: &mut G,
-        scene: &mut Stage<T, C, G::DrawParams, Instance>,
-    ) {
+    pub fn process(&mut self, pipeline: &mut P, context: &mut P::Context) {
+        let glyph_texture = pipeline.glyph_texture();
         let mut brush_action;
         loop {
             // Process the queued glyphs.
@@ -281,14 +277,27 @@ where
         // If the text has changed from what was last drawn, store new vertices.
         match brush_action.unwrap() {
             BrushAction::Draw(vertices) => {
-                self.vertices = vertices;
+                for buffer in self.vertices.values_mut() {
+                    buffer.clear();
+                }
+                for (layer, instance) in vertices {
+                    self.vertices
+                        .entry(layer)
+                        .or_insert_with(|| P::InstanceBuffer::new())
+                        .push(instance);
+                }
             }
             BrushAction::ReDraw => (),
         }
+    }
 
-        // Draw the stored vertices.
-        for (layer, instance) in self.vertices.iter() {
-            scene.add(layer.clone(), glyph_texture.draw_params(), instance.clone());
+    pub fn draw_layer(&mut self, batcher: &mut Batcher<P>, layer: &L) {
+        if let Some(instances) = self.vertices.get_mut(layer) {
+            batcher.flush();
+            let material = batcher.pipeline.glyph_texture().material();
+            batcher
+                .pipeline
+                .draw(batcher.context, &batcher.camera, &material, instances);
         }
     }
 }

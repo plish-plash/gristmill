@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, hash::Hash, path::Path};
 
 use emath::{Align2, Pos2, Rect, Vec2};
 use serde::Deserialize;
@@ -7,15 +7,19 @@ use super::{Instance, UvRect};
 use crate::{
     asset::{Asset, AssetError, YamlAsset},
     color::Color,
-    Batcher, Size,
+    Batcher, Pipeline, Size,
 };
 
 pub struct ColorRect(pub Color, pub Rect);
 
 impl ColorRect {
-    pub fn draw<T: Eq + PartialOrd>(&self, batcher: &mut Batcher<T, Instance>, params: T) {
-        batcher.add(
-            params,
+    pub fn draw<P: Pipeline<Instance = Instance>>(
+        &self,
+        batcher: &mut Batcher<P>,
+        material: &P::Material,
+    ) {
+        batcher.draw(
+            material,
             Instance {
                 rect: self.1,
                 uv: UvRect::default(),
@@ -26,12 +30,12 @@ impl ColorRect {
 }
 
 #[derive(Clone)]
-pub struct Sprite<T> {
-    pub params: T,
+pub struct Sprite<Material> {
+    pub material: Material,
     pub instance: Instance,
 }
 
-impl<T: Eq + PartialOrd + Clone> Sprite<T> {
+impl<Material: Eq + Hash + Clone> Sprite<Material> {
     pub fn translate(&mut self, translate: Vec2) {
         self.instance.rect = self.instance.rect.translate(translate);
     }
@@ -43,20 +47,24 @@ impl<T: Eq + PartialOrd + Clone> Sprite<T> {
         sprite.instance.rect = align.anchor_size(position, self.instance.rect.size());
         sprite
     }
-    pub fn draw(&self, batcher: &mut Batcher<T, Instance>) {
-        batcher.add(self.params.clone(), self.instance.clone())
+    pub fn draw<P: Pipeline<Material = Material, Instance = Instance>>(
+        &self,
+        batcher: &mut Batcher<P>,
+    ) {
+        batcher.draw(&self.material, self.instance.clone())
     }
 }
 
-pub struct NinePatchSprite<T> {
-    pub params: T,
+#[derive(Clone)]
+pub struct NinePatchSprite<Material> {
+    pub material: Material,
     pub texture_size: Size,
     pub texture_center: Rect,
     pub rect: Rect,
     pub color: Color,
 }
 
-impl<T> NinePatchSprite<T> {
+impl<Material> NinePatchSprite<Material> {
     fn instance(&self, pos_min: Pos2, pos_max: Pos2, tex_min: Pos2, tex_max: Pos2) -> Instance {
         Instance {
             rect: Rect::from_min_max(pos_min, pos_max),
@@ -65,69 +73,75 @@ impl<T> NinePatchSprite<T> {
         }
     }
 }
-impl<T: Eq + PartialOrd + Clone> NinePatchSprite<T> {
-    pub fn draw(&self, batcher: &mut Batcher<T, Instance>) {
+impl<Material: Eq + Hash + Clone> NinePatchSprite<Material> {
+    pub fn draw<P: Pipeline<Material = Material, Instance = Instance>>(
+        &self,
+        batcher: &mut Batcher<P>,
+    ) {
         let texture_size = self.texture_size.to_vec2();
         let rect_center = Rect::from_min_max(
             self.rect.min + self.texture_center.min.to_vec2(),
             self.rect.max - (texture_size - self.texture_center.max.to_vec2()),
         );
-        batcher.get_batch(self.params.clone()).extend([
-            self.instance(
-                self.rect.left_top(),
-                rect_center.left_top(),
-                Pos2::ZERO,
-                self.texture_center.left_top(),
-            ),
-            self.instance(
-                Pos2::new(rect_center.left(), self.rect.top()),
-                rect_center.right_top(),
-                Pos2::new(self.texture_center.left(), 0.0),
-                self.texture_center.right_top(),
-            ),
-            self.instance(
-                Pos2::new(rect_center.right(), self.rect.top()),
-                Pos2::new(self.rect.right(), rect_center.top()),
-                Pos2::new(self.texture_center.right(), 0.0),
-                Pos2::new(texture_size.x, self.texture_center.top()),
-            ),
-            self.instance(
-                Pos2::new(self.rect.left(), rect_center.top()),
-                rect_center.left_bottom(),
-                Pos2::new(0.0, self.texture_center.top()),
-                self.texture_center.left_bottom(),
-            ),
-            self.instance(
-                rect_center.left_top(),
-                rect_center.right_bottom(),
-                self.texture_center.left_top(),
-                self.texture_center.right_bottom(),
-            ),
-            self.instance(
-                rect_center.right_top(),
-                Pos2::new(self.rect.right(), rect_center.bottom()),
-                self.texture_center.right_top(),
-                Pos2::new(texture_size.x, self.texture_center.bottom()),
-            ),
-            self.instance(
-                Pos2::new(self.rect.left(), rect_center.bottom()),
-                Pos2::new(rect_center.left(), self.rect.bottom()),
-                Pos2::new(0.0, self.texture_center.bottom()),
-                Pos2::new(self.texture_center.left(), texture_size.y),
-            ),
-            self.instance(
-                rect_center.left_bottom(),
-                Pos2::new(rect_center.right(), self.rect.bottom()),
-                self.texture_center.left_bottom(),
-                Pos2::new(self.texture_center.right(), texture_size.y),
-            ),
-            self.instance(
-                rect_center.right_bottom(),
-                self.rect.right_bottom(),
-                self.texture_center.right_bottom(),
-                texture_size.to_pos2(),
-            ),
-        ]);
+        batcher.draw_all(
+            &self.material,
+            [
+                self.instance(
+                    self.rect.left_top(),
+                    rect_center.left_top(),
+                    Pos2::ZERO,
+                    self.texture_center.left_top(),
+                ),
+                self.instance(
+                    Pos2::new(rect_center.left(), self.rect.top()),
+                    rect_center.right_top(),
+                    Pos2::new(self.texture_center.left(), 0.0),
+                    self.texture_center.right_top(),
+                ),
+                self.instance(
+                    Pos2::new(rect_center.right(), self.rect.top()),
+                    Pos2::new(self.rect.right(), rect_center.top()),
+                    Pos2::new(self.texture_center.right(), 0.0),
+                    Pos2::new(texture_size.x, self.texture_center.top()),
+                ),
+                self.instance(
+                    Pos2::new(self.rect.left(), rect_center.top()),
+                    rect_center.left_bottom(),
+                    Pos2::new(0.0, self.texture_center.top()),
+                    self.texture_center.left_bottom(),
+                ),
+                self.instance(
+                    rect_center.left_top(),
+                    rect_center.right_bottom(),
+                    self.texture_center.left_top(),
+                    self.texture_center.right_bottom(),
+                ),
+                self.instance(
+                    rect_center.right_top(),
+                    Pos2::new(self.rect.right(), rect_center.bottom()),
+                    self.texture_center.right_top(),
+                    Pos2::new(texture_size.x, self.texture_center.bottom()),
+                ),
+                self.instance(
+                    Pos2::new(self.rect.left(), rect_center.bottom()),
+                    Pos2::new(rect_center.left(), self.rect.bottom()),
+                    Pos2::new(0.0, self.texture_center.bottom()),
+                    Pos2::new(self.texture_center.left(), texture_size.y),
+                ),
+                self.instance(
+                    rect_center.left_bottom(),
+                    Pos2::new(rect_center.right(), self.rect.bottom()),
+                    self.texture_center.left_bottom(),
+                    Pos2::new(self.texture_center.right(), texture_size.y),
+                ),
+                self.instance(
+                    rect_center.right_bottom(),
+                    self.rect.right_bottom(),
+                    self.texture_center.right_bottom(),
+                    texture_size.to_pos2(),
+                ),
+            ],
+        );
     }
 }
 
@@ -151,8 +165,8 @@ impl Default for SpriteSheetDefinition {
 impl YamlAsset for SpriteSheetDefinition {}
 
 #[derive(Clone)]
-pub struct SpriteSheet<T> {
-    sprite: Sprite<T>,
+pub struct SpriteSheet<Material> {
+    sprite: Sprite<Material>,
     texture_size: Size,
     frame_size: Vec2,
     frames: HashMap<String, Vec<Pos2>>,
@@ -163,8 +177,8 @@ pub struct SpriteSheet<T> {
     frame_time: f32,
 }
 
-impl<T> SpriteSheet<T> {
-    pub fn new(params: T, texture_size: Size, definition: SpriteSheetDefinition) -> Self {
+impl<Material> SpriteSheet<Material> {
+    pub fn new(material: Material, texture_size: Size, definition: SpriteSheetDefinition) -> Self {
         let current_animation = definition
             .frames
             .keys()
@@ -173,7 +187,7 @@ impl<T> SpriteSheet<T> {
             .to_string();
         let mut sprite_sheet = SpriteSheet {
             sprite: Sprite {
-                params,
+                material,
                 instance: Instance {
                     rect: Rect::from_min_size(Pos2::ZERO, definition.frame_size),
                     uv: UvRect::default(),
@@ -192,15 +206,15 @@ impl<T> SpriteSheet<T> {
         sprite_sheet.set_animation_frame(0);
         sprite_sheet
     }
-    pub fn load(params: T, texture_size: Size, path: &Path) -> Result<Self, AssetError> {
+    pub fn load(material: Material, texture_size: Size, path: &Path) -> Result<Self, AssetError> {
         Ok(Self::new(
-            params,
+            material,
             texture_size,
             SpriteSheetDefinition::load(path)?,
         ))
     }
 
-    pub fn sprite(&self) -> &Sprite<T> {
+    pub fn sprite(&self) -> &Sprite<Material> {
         &self.sprite
     }
     pub fn set_position(&mut self, pos: Pos2, anchor: Align2) {
