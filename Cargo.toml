@@ -1,0 +1,19 @@
+[package]
+name = "gristmill"
+version = "0.3.0"
+edition = "2021"
+
+[dependencies]
+silica-gui = { git = "https://github.com/plish-plash/silica.git" }
+silica-wgpu = { git = "https://github.com/plish-plash/silica.git" }
+bytemuck = "1.23"
+serde = { version = "1.0", features = ["derive"] }
+euclid = { version = "0.22", features = ["bytemuck", "serde"] }
+log = "0.4"
+
+winit = "0.30"
+env_logger = "0.11"
+png = "0.17"
+etagere = "0.2"
+fluent-bundle = "0.15"
+unic-langid = "0.9"
