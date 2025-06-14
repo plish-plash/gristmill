@@ -12,7 +12,7 @@ impl Game for ErrorGame {
             "An error occurred while loading the game.".to_string(),
         ))
     }
-    fn resize(&mut self, _context: &Context, _size: SurfaceSize) {}
+    fn window_resize(&mut self, _context: &Context, _size: SurfaceSize) {}
     fn input_event(&mut self, _event: InputEvent) {}
     fn update(&mut self, _dt: f32) {}
     fn clear_color(&self) -> Rgba {

@@ -128,12 +128,14 @@ impl<G: Game> ApplicationHandler for App<G> {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => {
-                event_loop.exit();
+                if self.game.window_close() {
+                    event_loop.exit();
+                }
             }
             WindowEvent::Resized(size) => {
                 let size = Self::convert_size(size);
                 self.surface.resize(&self.context, size);
-                self.game.resize(&self.context, size);
+                self.game.window_resize(&self.context, size);
                 self.window.as_ref().unwrap().request_redraw();
             }
             WindowEvent::RedrawRequested => {
@@ -179,7 +181,7 @@ impl<G: Game> ApplicationHandler for App<G> {
             {
                 self.game.load(&self.context, self.surface.config().format);
                 self.game
-                    .resize(&self.context, Self::convert_size(window.inner_size()));
+                    .window_resize(&self.context, Self::convert_size(window.inner_size()));
             }
             let now = Instant::now();
             if now - self.last_update >= self.min_frame_time {

@@ -63,7 +63,10 @@ static HAS_PANICKED: AtomicBool = AtomicBool::new(false);
 
 pub trait Game: Sized {
     fn load(context: &Context, surface_format: wgpu::TextureFormat) -> Result<Self, GameError>;
-    fn resize(&mut self, context: &Context, size: SurfaceSize);
+    fn window_close(&mut self) -> bool {
+        true
+    }
+    fn window_resize(&mut self, context: &Context, size: SurfaceSize);
     fn input_event(&mut self, event: InputEvent);
     fn update(&mut self, dt: f32);
     fn clear_color(&self) -> Rgba;

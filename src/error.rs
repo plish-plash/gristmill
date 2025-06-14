@@ -127,10 +127,17 @@ impl<T: Game> LoadGame<T> {
             }
         };
     }
-    pub fn resize(&mut self, context: &Context, size: SurfaceSize) {
+    pub fn window_close(&mut self) -> bool {
+        if let LoadGame::Game(game) = self {
+            game.window_close()
+        } else {
+            true
+        }
+    }
+    pub fn window_resize(&mut self, context: &Context, size: SurfaceSize) {
         match self {
             LoadGame::NotLoaded => (),
-            LoadGame::Game(game) => game.resize(context, size),
+            LoadGame::Game(game) => game.window_resize(context, size),
             LoadGame::Error(gui, renderer) => {
                 renderer.surface_resize(context, size);
                 gui.set_available_space(taffy::Size {

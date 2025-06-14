@@ -65,7 +65,7 @@ impl Game for WasdGame {
             player_texture,
         })
     }
-    fn resize(&mut self, _context: &Context, size: SurfaceSize) {
+    fn window_resize(&mut self, _context: &Context, size: SurfaceSize) {
         self.renderer.surface_resize(size);
     }
     fn input_event(&mut self, event: InputEvent) {
