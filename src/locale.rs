@@ -1,12 +1,11 @@
 use std::borrow::Cow;
 
+pub use fluent_bundle::FluentArgs;
 use fluent_bundle::{FluentBundle, FluentMessage, FluentResource};
 use silica_gui::glyphon::FontSystem;
 use unic_langid::LanguageIdentifier;
 
 use crate::GameError;
-
-pub use fluent_bundle::FluentArgs;
 
 pub struct Message<'a>(&'a str, Option<FluentMessage<'a>>);
 

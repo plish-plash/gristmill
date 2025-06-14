@@ -803,6 +803,7 @@ dependencies = [
  "serde",
  "silica-gui",
  "silica-wgpu",
+ "sys-locale",
  "unic-langid",
  "winit",
 ]
@@ -1802,6 +1803,7 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 [[package]]
 name = "silica-color"
 version = "0.1.0"
+source = "git+https://github.com/plish-plash/silica.git#4516e674e1fcee870f9e7b084c137225764051f3"
 dependencies = [
  "bytemuck",
  "serde",
@@ -1810,6 +1812,7 @@ dependencies = [
 [[package]]
 name = "silica-gui"
 version = "0.1.0"
+source = "git+https://github.com/plish-plash/silica.git#4516e674e1fcee870f9e7b084c137225764051f3"
 dependencies = [
  "bytemuck",
  "euclid",
@@ -1825,6 +1828,7 @@ dependencies = [
 [[package]]
 name = "silica-gui-macros"
 version = "0.1.0"
+source = "git+https://github.com/plish-plash/silica.git#4516e674e1fcee870f9e7b084c137225764051f3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1834,6 +1838,7 @@ dependencies = [
 [[package]]
 name = "silica-wgpu"
 version = "0.1.0"
+source = "git+https://github.com/plish-plash/silica.git#4516e674e1fcee870f9e7b084c137225764051f3"
 dependencies = [
  "bytemuck",
  "euclid",

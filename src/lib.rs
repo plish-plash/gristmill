@@ -6,16 +6,6 @@ pub mod util;
 mod window;
 pub mod world2d;
 
-pub use euclid as math;
-pub use silica_gui as gui;
-pub use silica_gui::Rgba;
-pub use silica_wgpu as render;
-pub use winit::{event as input, keyboard};
-
-pub use error::{GameError, ResultExt};
-pub use image::*;
-pub use window::*;
-
 use std::{
     fs::{File, OpenOptions},
     io::Write,
@@ -27,11 +17,22 @@ use std::{
     },
 };
 
+pub use euclid as math;
+pub use silica_gui as gui;
+pub use silica_gui::Rgba;
 use silica_gui::{
     glyphon::{fontdb, FontSystem},
     theme::StandardThemeLoader,
 };
+pub use silica_wgpu as render;
 use silica_wgpu::{wgpu, Context, SurfaceSize};
+pub use winit::{event as input, keyboard};
+
+pub use crate::{
+    error::{GameError, ResultExt},
+    image::*,
+    window::*,
+};
 
 pub struct LocalSpace;
 pub struct WorldSpace;
@@ -193,15 +194,22 @@ where
     Ok(())
 }
 
+pub fn get_locale() -> String {
+    sys_locale::get_locale().unwrap_or_else(|| {
+        log::warn!("failed to get system locale, falling back to en-US");
+        "en-US".to_string()
+    })
+}
+
 pub fn load_fonts() -> Result<FontSystem, GameError> {
-    let mut fonts = Vec::new();
+    let mut db = fontdb::Database::new();
     read_directory("fonts", |path| {
-        fonts.push(load_asset(path, |path| {
+        db.load_font_source(load_asset(path, |path| {
             Ok(fontdb::Source::Binary(Arc::new(std::fs::read(path)?)))
         })?);
         Ok(())
     })?;
-    Ok(FontSystem::new_with_fonts(fonts))
+    Ok(FontSystem::new_with_locale_and_db(get_locale(), db))
 }
 
 pub fn load_gui_theme() -> Result<StandardThemeLoader<'static>, GameError> {
